@@ -33,6 +33,24 @@ Google Docs / clean HTML reports / optional Sheet exports
 | Google Docs / HTML | Polished reports and client-facing deliverables |
 | Google Sheets | Optional export layer only |
 
+## Client isolation and filtering
+
+Every operational row must have a `client_id`. Every tab, Sheet update script, dashboard API query, and frontend view must filter by the selected `client_id`. Selecting a client means the user sees only that client's CTR tests, jobs, content items, approvals, opportunities, tasks, reports, activity, and performance. All-client/global rows are shown only in the All Clients view.
+
+Telegram onboarding must be atomic from the operator's perspective:
+
+```text
+Telegram setup message
+  -> create/update client registry row
+  -> create per-client Hermes profile
+  -> create per-client workspace
+  -> queue setup tasks/jobs
+  -> update dashboard
+  -> send Telegram confirmation to the same topic
+```
+
+Before inserting a client, check existing clients by domain and common variants so `my-inclusion` and `myinclusion` style slug differences do not create duplicates.
+
 ## Update model
 
 - Daily refresh updates the operating picture.

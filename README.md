@@ -8,6 +8,8 @@ SEO OS gives an agency owner or business owner a structured way to run SEO work 
 - local SQLite operational state
 - per-client Hermes profiles
 - per-client VPS workspaces
+- automatic dashboard updates from Telegram onboarding
+- Telegram confirmation after client setup
 - scheduled SEO checks and reports
 - approval-gated agent work
 - CTR tests
@@ -92,7 +94,7 @@ python3 scripts/setup_seo_os.py \
   --dry-run
 ```
 
-Remove `--dry-run` only when you are ready to create local workspace files.
+Remove `--dry-run` only when you are ready to create local workspace files. When `--telegram-target` is present, setup also creates the per-client Hermes profile by default, upserts the local SEO OS dashboard when its SQLite DB exists, and sends a Telegram confirmation unless you pass `--no-send-confirmation`.
 
 ## Product architecture direction
 
@@ -110,6 +112,12 @@ Model policy:
 - No model for raw API pulls and normalization.
 - Cheap model for labeling, lightweight summaries, review-response drafts, and opportunity explanations.
 - Stronger model only for strategic plans, SERP synthesis, and approved content/change recommendations.
+
+## Client filtering and onboarding defaults
+
+- Every visible tab or dashboard view must respect the active client filter. If My Inclusion is selected, CTR Tests, Schedule, Content, Approvals, Opportunities, Tasks, Activity, Reports, and Performance must show only My Inclusion rows. Global rows are allowed only in the All Clients view.
+- Adding a client from Telegram must create/update the client registry/dashboard row, create a per-client Hermes profile, create the workspace, queue setup tasks, and send a completion message back to the same Telegram topic.
+- Never create a duplicate client because of slug differences. Check existing clients by exact domain and common domain variants before inserting a new row.
 
 ## Safety defaults
 

@@ -56,7 +56,7 @@ Recommended sequence:
 2. Capture client facts with `templates/onboarding/client-intake.md`.
 3. Research the public site/client from the website URL, sitemap, homepage, about/service pages, and public search results.
 4. Return a short "what I think this client is" brief for the user to correct before locking the profile.
-5. Run `scripts/setup_seo_os.py` with client name, domain, offer, audience, conversion goal, GSC/GA4 properties, Telegram target, and first workflow.
+5. Run `scripts/setup_seo_os.py` with client name, domain, offer, audience, conversion goal, GSC/GA4 properties, Telegram target, and first workflow. With a Telegram target, the script should create the per-client profile by default, upsert the dashboard when available, and send a completion message back to the same topic.
 6. Verify Telegram routing with outbound and inbound topic tests.
 7. Verify read-only GSC/GA4, sitemap, robots.txt, and homepage access.
 8. Generate a baseline report and top opportunities.
@@ -64,6 +64,12 @@ Recommended sequence:
 10. Dashboard approval should update state, create or update a bounded task, send Telegram confirmation, and leave production changes separately gated.
 
 See `docs/onboarding-sequence.md` for the full community-ready flow.
+
+## Non-negotiable Client Filtering Rule
+
+Every tab, dashboard section, API query, Sheet updater, and report index must respect the selected client. If the user filters to one client, show only rows where `client_id` exactly matches that client. Do not show another client's CTR tests, jobs, approvals, content items, opportunities, tasks, reports, activity, or performance. Global/all-client policy rows should appear in the All Clients view only unless intentionally copied into that client's own rows.
+
+Before onboarding, search existing clients by domain and common variants. Use the canonical existing `client_id` if found. Do not create duplicate clients because of slug differences like `my-inclusion` vs `myinclusion`.
 
 ## Google Sheet Principles
 
@@ -131,6 +137,19 @@ Create a separate workspace per client:
 ```
 
 Keep raw/internal artifacts in the workspace. Show users links only when they are reviewable or actionable.
+
+## Telegram Onboarding Contract
+
+When a client is added from Telegram, SEO OS must complete the visible setup loop before replying:
+
+1. create or update the client registry/dashboard row,
+2. create the per-client Hermes profile using the client name/slug,
+3. create the per-client workspace and starter docs,
+4. queue setup tasks and setup-needed jobs,
+5. bind the Telegram topic target, and
+6. send a concise confirmation back to the same Telegram topic.
+
+The confirmation should say the dashboard was updated, which profile/workspace was created, and what the next setup step is.
 
 ## Profile Separation
 

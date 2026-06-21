@@ -11,6 +11,7 @@ import argparse
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,6 +77,90 @@ def create_profile(profile: str, dry_run: bool) -> dict:
         }
     except Exception as e:
         return {'attempted': True, 'ok': False, 'error': str(e)}
+
+
+
+
+def dashboard_db_path(value: str | None) -> Path | None:
+    if value:
+        return Path(value)
+    default = Path('/root/seo-os-dashboard/data/seo-os.sqlite')
+    return default if default.exists() else None
+
+
+def dashboard_uid(prefix: str, client_id: str) -> str:
+    return f'{prefix}_{client_id}'
+
+
+def upsert_dashboard_client(args: argparse.Namespace, client_id: str, domain: str, profile: str, workspace: Path, now: str) -> dict:
+    db = dashboard_db_path(args.dashboard_db)
+    if not db:
+        return {'attempted': False, 'ok': True, 'message': 'dashboard DB not found; skipped'}
+    if args.dry_run:
+        return {'attempted': True, 'dry_run': True, 'db': str(db), 'client_id': client_id}
+    client_name = args.client_name
+    telegram_target = args.telegram_target or 'not_bound'
+    try:
+        with sqlite3.connect(db) as conn:
+            conn.execute('PRAGMA foreign_keys=ON')
+            existing = conn.execute('SELECT id FROM clients WHERE domain=? OR domain=?', (domain, f'www.{domain}')).fetchone()
+            if existing:
+                client_id = existing[0]
+            conn.execute("""INSERT INTO clients (id,name,domain,role,status,health_score,hermes_profile,telegram_topic,gsc_status,ga4_status,repo_status,zernio_status,workspace,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET name=excluded.name, domain=excluded.domain, role=excluded.role, status=excluded.status,
+                health_score=excluded.health_score, hermes_profile=excluded.hermes_profile, telegram_topic=excluded.telegram_topic,
+                gsc_status=excluded.gsc_status, ga4_status=excluded.ga4_status, repo_status=excluded.repo_status, zernio_status=excluded.zernio_status,
+                workspace=excluded.workspace, updated_at=excluded.updated_at""", (
+                    client_id, client_name, domain, args.client_type, 'setup', 40, profile, telegram_target,
+                    'connected' if args.gsc_property else 'needs_setup',
+                    'connected' if args.ga4_property else 'needs_setup',
+                    'needs_setup' if not args.repo else 'connected',
+                    'needs_setup' if 'review-management' in args.enable_workflow else 'not_connected',
+                    str(workspace), now, now,
+                ))
+            if not conn.execute('SELECT 1 FROM metrics_snapshots WHERE client_id=? LIMIT 1', (client_id,)).fetchone():
+                conn.execute('INSERT INTO metrics_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', (
+                    dashboard_uid('metric', client_id), client_id, 'Awaiting first data refresh', 0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0, now
+                ))
+            conn.execute('INSERT OR REPLACE INTO managed_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (
+                dashboard_uid('job_setup', client_id), client_id, f'{client_name} data refresh', 'data_refresh', 'Daily after setup',
+                'Waiting for setup', 'Never', 'setup_needed', 'No model for raw GSC/GA4 pulls', 'GSC, GA4, sitemap',
+                'Waiting for analytics verification.', 'SEO OS managed scheduler'
+            ))
+            conn.execute('INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)', (
+                dashboard_uid('ev_onboarded', client_id), client_id, 'telegram' if args.telegram_target else 'setup', 'client_onboarded', 'setup_needed',
+                f'{client_name} added to SEO OS dashboard.', 'Verify analytics access and approve the first safe workflow.', str(workspace / 'site-profile.md'), now
+            ))
+            conn.execute('INSERT OR REPLACE INTO agent_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (
+                dashboard_uid('task_intake', client_id), client_id, f'Complete {client_name} SEO OS setup', 'high', 'ready', 'onboarding',
+                profile, args.site_url or f'https://{domain}/', 'Verify GSC/GA4, business intake, CMS/repo boundary, and approval policy.',
+                'Created by setup_seo_os.py. Production changes remain separately gated.', now, now
+            ))
+            conn.commit()
+        return {'attempted': True, 'ok': True, 'db': str(db), 'client_id': client_id}
+    except Exception as exc:
+        return {'attempted': True, 'ok': False, 'db': str(db), 'error': str(exc)}
+
+
+def send_telegram_confirmation(args: argparse.Namespace, profile: str, workspace: Path, dashboard_result: dict) -> dict:
+    if args.no_send_confirmation or not args.telegram_target:
+        return {'attempted': False, 'ok': True, 'message': 'telegram confirmation skipped'}
+    message = (
+        f"SEO OS onboarding complete: {args.client_name}\n\n"
+        f"Dashboard updated: {'yes' if dashboard_result.get('ok') or dashboard_result.get('dry_run') else 'check needed'}\n"
+        f"Hermes profile: {profile}\n"
+        f"Workspace: {workspace}\n\n"
+        "Next step: verify GSC/GA4 and approve the first safe SEO workflow. Production changes remain separately approval-gated."
+    )
+    cmd = ['hermes', 'send', '--to', args.telegram_target, message]
+    if args.dry_run:
+        return {'attempted': True, 'dry_run': True, 'cmd': cmd, 'message': message}
+    try:
+        cp = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return {'attempted': True, 'ok': cp.returncode == 0, 'returncode': cp.returncode, 'stdout': cp.stdout[-1000:], 'stderr': cp.stderr[-1000:]}
+    except Exception as exc:
+        return {'attempted': True, 'ok': False, 'error': str(exc)}
 
 
 def setup(args: argparse.Namespace) -> dict:
@@ -279,10 +364,22 @@ Use this workspace for SEO/GEO/LLM SEO work on {args.site_url or 'https://' + do
     write_if_missing(workspace / 'client-config.json', json.dumps(config, indent=2), args.dry_run)
 
     profile_result = {'attempted': False}
-    if args.create_profile:
+    should_create_profile = not args.no_create_profile and (args.create_profile or bool(args.telegram_target))
+    if should_create_profile:
         profile_result = create_profile(profile, args.dry_run)
 
-    return {'ok': True, 'workspace': str(workspace), 'profile': profile, 'profile_result': profile_result, 'dry_run': args.dry_run}
+    dashboard_result = upsert_dashboard_client(args, client_slug, domain, profile, workspace, now)
+    telegram_result = send_telegram_confirmation(args, profile, workspace, dashboard_result)
+
+    return {
+        'ok': True,
+        'workspace': str(workspace),
+        'profile': profile,
+        'profile_result': profile_result,
+        'dashboard_result': dashboard_result,
+        'telegram_result': telegram_result,
+        'dry_run': args.dry_run,
+    }
 
 
 def main() -> None:
@@ -310,7 +407,10 @@ def main() -> None:
     parser.add_argument('--sheet-id')
     parser.add_argument('--telegram-target')
     parser.add_argument('--enable-workflow', action='append', default=[])
-    parser.add_argument('--create-profile', action='store_true')
+    parser.add_argument('--create-profile', action='store_true', help='Create the per-client Hermes profile. Also enabled automatically when --telegram-target is provided unless --no-create-profile is set.')
+    parser.add_argument('--no-create-profile', action='store_true', help='Do not create a Hermes profile, even for Telegram onboarding.')
+    parser.add_argument('--dashboard-db', help='Path to SEO OS dashboard SQLite DB. Defaults to /root/seo-os-dashboard/data/seo-os.sqlite when present.')
+    parser.add_argument('--no-send-confirmation', action='store_true', help='Do not send the Telegram onboarding completion message.')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     result = setup(args)
