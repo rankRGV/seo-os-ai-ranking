@@ -15,18 +15,18 @@ This is the recommended onboarding flow for the dashboard-first SEO OS starter k
 
 ## Core principle
 
-A Telegram topic and website URL are enough to start the conversation, but not enough to operate safely.
+A Discord channel/thread and website URL are enough to start the conversation, but not enough to operate safely.
 
-If setup starts in Telegram, SEO OS must still complete the visible setup loop before replying:
+If setup starts in Discord, SEO OS must still complete the visible setup loop before replying:
 
 ```text
-Telegram setup message
+Discord setup message
   -> create/update dashboard client row
   -> create per-client Hermes profile
   -> create per-client workspace
   -> queue setup tasks and setup-needed jobs
-  -> bind the Telegram topic target
-  -> send confirmation back to the same Telegram topic
+  -> bind the Discord channel/thread target
+  -> send confirmation back to the same Discord channel/thread
 ```
 
 The confirmation should tell the operator that the dashboard was updated, which profile/workspace was created, and what the next setup step is.
@@ -43,7 +43,7 @@ The confirmation should tell the operator that the dashboard was updated, which 
 | Primary conversion goal | yes | Calls, bookings, trials, paid signups, leads, purchases |
 | GSC property | yes for real SEO | URL-prefix or domain property |
 | GA4 property | recommended | Needed for landing-page quality and conversions |
-| Telegram topic target | yes for Telegram flow | Must be explicit `telegram:<chat_id>:<thread_id>` |
+| Discord channel/thread target | yes for Discord flow | `discord:<channel_id>` or `discord:<channel_id>:<thread_id>` |
 | Approval policy | yes | Defines what can happen without approval |
 | CMS/platform | recommended | Astro/Cloudflare, WordPress, Webflow, Shopify, Wix, custom, etc. |
 | Content delivery mode | yes | Default to `google_doc` unless repo/CMS automation is intentionally connected |
@@ -76,6 +76,7 @@ Generate image style guide? yes/no
 Repo/hosting access:
 Staging URL:
 Reviews/Zernio/GBP:
+Discord channel/thread target:
 Notes:
 ```
 
@@ -107,7 +108,7 @@ Create or update the SEO OS registry and dashboard immediately:
 
 ```text
 clients.yaml or SQLite clients table
-telegram_bindings table or config section
+channel_bindings table or config section
 approval policy row
 managed jobs rows, initially disabled or setup_needed
 client-scoped dashboard rows for every visible tab
@@ -117,15 +118,15 @@ Before inserting a client, search existing clients by exact domain and common va
 
 ## Stage 2: Verify routing
 
-Topic names are not enough. Verify the actual topic binding.
+Channel names are not enough. Verify the actual channel/thread binding.
 
-1. Send an outbound test message to `telegram:<chat_id>:<thread_id>`.
-2. Operator confirms it appears in the intended topic.
-3. Operator sends a normal standalone message in that same topic.
-4. Confirm Hermes receives the inbound message with the same thread ID.
+1. Send an outbound test message to the Discord channel/thread.
+2. Operator confirms it appears in the intended channel/thread.
+3. Operator sends a normal standalone message in that same channel/thread.
+4. Confirm Hermes receives the inbound message with the same channel/thread ID.
 5. Save the verified target and timestamp.
 
-If inbound does not work, check Telegram allowed chats, free response chats, `require_mention: false`, BotFather privacy mode, and bot permissions in the group/topic.
+If inbound does not work, check Discord bot permissions, channel access, thread permissions, and `require_mention` settings.
 
 ## Stage 3: Verify data access
 
@@ -187,7 +188,7 @@ Dashboard decision
   -> update approval_requests.status
   -> log activity_events
   -> create/update agent_tasks row
-  -> send Telegram confirmation to the bound topic
+  -> send Discord confirmation to the bound channel/thread
   -> worker/dispatcher picks up ready task with the correct profile
 ```
 

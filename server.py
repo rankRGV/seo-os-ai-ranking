@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS clients (
   status TEXT NOT NULL,
   health_score INTEGER NOT NULL,
   hermes_profile TEXT NOT NULL,
-  telegram_topic TEXT NOT NULL,
+  channel_target TEXT NOT NULL,
   gsc_status TEXT NOT NULL,
   ga4_status TEXT NOT NULL,
   repo_status TEXT NOT NULL,

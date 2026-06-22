@@ -8,8 +8,8 @@ SEO OS gives an agency owner or business owner a structured way to run SEO work 
 - local SQLite operational state
 - per-client Hermes profiles
 - per-client VPS workspaces
-- automatic dashboard updates from Telegram onboarding
-- Telegram confirmation after client setup
+- automatic dashboard updates from Discord onboarding
+- Discord confirmation after client setup
 - scheduled SEO checks and reports
 - approval-gated agent work
 - CTR tests
@@ -17,7 +17,7 @@ SEO OS gives an agency owner or business owner a structured way to run SEO work 
 - content and client expertise intake
 - reusable client knowledge libraries
 
-This repo is intentionally a template. It ships with fake demo data only. Do not commit client data, API tokens, private Telegram IDs, Search Console exports, analytics exports, SQLite databases, logs, generated reports, or local workspace files.
+This repo is intentionally a template. It ships with fake demo data only. Do not commit client data, API tokens, private Discord IDs, Search Console exports, analytics exports, SQLite databases, logs, generated reports, or local workspace files.
 
 ## Mental model
 
@@ -25,8 +25,8 @@ This repo is intentionally a template. It ships with fake demo data only. Do not
 Custom SEO OS Dashboard = operating board
 SQLite = local template/demo state
 Hermes = worker
-Telegram = operator notification layer
-Hermes profiles = client separation
+- Discord = operator notification layer
+- Hermes profiles = client separation
 VPS file system = internal workspace and data store
 Google Docs / clean HTML = polished reports and client-facing deliverables
 Google Sheets = optional export layer, not the primary dashboard
@@ -72,7 +72,7 @@ Never commit:
 - `logs/` files
 - `generated/` plans or reports
 - real client workspace paths
-- private Telegram chat IDs or thread IDs
+- private Discord chat/channel IDs or thread IDs
 - Search Console, GA4, Google Workspace, Cloudflare, Zernio, or email credentials
 - real customer/client names unless they are intentionally public demo examples
 
@@ -94,7 +94,7 @@ python3 scripts/setup_seo_os.py \
   --dry-run
 ```
 
-Remove `--dry-run` only when you are ready to create local workspace files. When `--telegram-target` is present, setup also creates the per-client Hermes profile by default, upserts the local SEO OS dashboard when its SQLite DB exists, and sends a Telegram confirmation unless you pass `--no-send-confirmation`.
+Remove `--dry-run` only when you are ready to create local workspace files. When `--discord-channel` is present, setup also creates the per-client Hermes profile by default, upserts the local SEO OS dashboard when its SQLite DB exists, and can send a Discord confirmation message.
 
 ## Product architecture direction
 
@@ -116,7 +116,7 @@ Model policy:
 ## Client filtering and onboarding defaults
 
 - Every visible tab or dashboard view must respect the active client filter. If My Inclusion is selected, CTR Tests, Schedule, Content, Approvals, Opportunities, Tasks, Activity, Reports, and Performance must show only My Inclusion rows. Global rows are allowed only in the All Clients view.
-- Adding a client from Telegram must create/update the client registry/dashboard row, create a per-client Hermes profile, create the workspace, queue setup tasks, and send a completion message back to the same Telegram topic.
+- Adding a client from Discord must create/update the client registry/dashboard row, create a per-client Hermes profile, create the workspace, queue setup tasks, and send a completion message back to the same Discord channel/thread.
 - Never create a duplicate client because of slug differences. Check existing clients by exact domain and common domain variants before inserting a new row.
 
 ## Safety defaults

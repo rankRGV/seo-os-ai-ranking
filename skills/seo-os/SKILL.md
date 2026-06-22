@@ -1,29 +1,29 @@
 ---
 name: seo-os
-description: "Use when setting up, operating, or extending SEO OS: a Hermes-powered SEO agency operating system using Google Sheets, per-client profiles, VPS workspaces, approval workflows, CTR tests, content expertise intake, and review management."
-version: 0.1.0
-author: Hermes Agent
+description: "Use when setting up, operating, or extending SEO OS: a Hermes-powered SEO agency operating system using per-client profiles, VPS workspaces, approval workflows, CTR tests, content expertise intake, and review management."
+version: 0.2.0
+author: hturbano
 license: MIT
 metadata:
   hermes:
-    tags: [seo, agency, google-sheets, search-console, approvals, content, local-seo]
-    related_skills: [hermes-agent, productivity-document-workflows, datawise-marketing-seo-operations]
+    tags: [seo, agency, search-console, approvals, content, local-seo, discord]
+    related_skills: [hermes-agent, productivity-document-workflows]
 ---
 
 # SEO OS
 
 ## Overview
 
-SEO OS is a Hermes-powered operating system for SEO work. It combines a human-readable Google Sheet, per-client Hermes profiles, VPS workspaces, scheduled jobs, approval workflows, and report/document generation.
+SEO OS is a Hermes-powered operating system for SEO work. It combines a custom dashboard, per-client Hermes profiles, VPS workspaces, scheduled jobs, approval workflows, and report/document generation.
 
 Use this skill when helping a user set up, operate, or extend the SEO OS starter kit.
 
 Core mental model:
 
 ```text
-Google Sheet = operating board
+Dashboard = operating board
 Hermes = worker
-Telegram = operator notification layer
+Discord = operator notification layer
 Hermes profiles = client separation
 VPS file system = internal workspace and data store
 Google Docs = polished reports and client-facing deliverables
@@ -33,7 +33,7 @@ Google Docs = polished reports and client-facing deliverables
 
 Use this skill when the task involves:
 
-- creating or updating the SEO OS Google Sheet
+- creating or updating the SEO OS dashboard
 - adding a new SEO client/site
 - creating a per-client Hermes profile or workspace
 - planning daily/weekly SEO automation
@@ -44,73 +44,32 @@ Use this skill when the task involves:
 - building a client knowledge library
 - generating SEO reports or client updates
 
-Do not use this for generic SEO advice without any SEO OS workflow, Sheet, client profile, or automation context.
+Do not use this for generic SEO advice without any SEO OS workflow, client profile, or automation context.
 
 ## Client Onboarding Sequence
 
-A new Telegram topic plus website URL is only a starting signal. A safe SEO OS setup requires a client registry row, explicit Telegram chat/thread binding, workspace, optional site-specific Hermes profile, GSC/GA4 property mapping, approval policy, and business context.
+A new Discord channel/thread plus website URL is only a starting signal. A safe SEO OS setup requires a client registry row, explicit Discord channel/thread binding, workspace, optional site-specific Hermes profile, GSC/GA4 property mapping, approval policy, and business context.
 
 Recommended sequence:
 
-1. Operator creates a new Telegram topic named after the client and sends the setup message there.
+1. Operator creates a new Discord channel or thread named after the client and sends the setup message there.
 2. Capture client facts with `templates/onboarding/client-intake.md`.
 3. Research the public site/client from the website URL, sitemap, homepage, about/service pages, and public search results.
 4. Return a short "what I think this client is" brief for the user to correct before locking the profile.
-5. Run `scripts/setup_seo_os.py` with client name, domain, offer, audience, conversion goal, GSC/GA4 properties, Telegram target, and first workflow. With a Telegram target, the script should create the per-client profile by default, upsert the dashboard when available, and send a completion message back to the same topic.
-6. Verify Telegram routing with outbound and inbound topic tests.
+5. Run `scripts/setup_seo_os.py` with client name, domain, offer, audience, conversion goal, GSC/GA4 properties, Discord channel target, and first workflow. With a Discord target, the script should create the per-client profile by default, upsert the dashboard when available.
+6. Verify Discord routing with outbound and inbound channel/thread tests.
 7. Verify read-only GSC/GA4, sitemap, robots.txt, and homepage access.
 8. Generate a baseline report and top opportunities.
 9. Ask for one bounded first approval, usually low-CTR title/meta planning or one-page SERP gap analysis.
-10. Dashboard approval should update state, create or update a bounded task, send Telegram confirmation, and leave production changes separately gated.
+10. Dashboard approval should update state, create or update a bounded task, send Discord confirmation, and leave production changes separately gated.
 
-See `docs/onboarding-sequence.md` for the full community-ready flow.
+See `docs/onboarding-sequence.md` for the full flow.
 
 ## Non-negotiable Client Filtering Rule
 
-Every tab, dashboard section, API query, Sheet updater, and report index must respect the selected client. If the user filters to one client, show only rows where `client_id` exactly matches that client. Do not show another client's CTR tests, jobs, approvals, content items, opportunities, tasks, reports, activity, or performance. Global/all-client policy rows should appear in the All Clients view only unless intentionally copied into that client's own rows.
+Every tab, dashboard section, API query, and report index must respect the selected client. If the user filters to one client, show only rows where `client_id` exactly matches that client. Do not show another client's CTR tests, jobs, approvals, content items, opportunities, tasks, reports, activity, or performance. Global/all-client policy rows should appear in the All Clients view only unless intentionally copied into that client's own rows.
 
 Before onboarding, search existing clients by domain and common variants. Use the canonical existing `client_id` if found. Do not create duplicate clients because of slug differences like `my-inclusion` vs `myinclusion`.
-
-## Google Sheet Principles
-
-Visible tabs should be human-readable and useful to an agency owner or business owner.
-
-Avoid in user-facing tabs:
-
-- raw job IDs
-- raw client IDs
-- local VPS paths
-- workdirs
-- scripts
-- skill names
-- raw cron output paths
-- excessive artifact inventory
-
-Prefer:
-
-- client names, color-coded
-- plain-English job descriptions
-- readable dates
-- same-window metrics
-- one filter only where useful
-- concise top-level summaries
-- approval/status dropdowns only where they create action
-
-## Default Tabs
-
-- `Control Center`: what needs attention now.
-- `Clients`: one row per client/site and routing details.
-- `Agent Responsibilities`: plain-English list of what agents own.
-- `Schedule`: recurring jobs and what they do.
-- `Activity Log`: important outcomes only, not a transcript.
-- `Approvals`: approval queue.
-- `SEO Opportunities`: potential work from data and analysis.
-- `CTR Tests`: title/meta tests from baseline to report.
-- `Review Management`: local SEO review monitoring and response workflow.
-- `Agent Tasks`: execution queue.
-- `Telegram Routing`: operator notification routing.
-- `Performance Snapshot`: same-window SEO metrics.
-- `Content & Expertise`: content plan plus client SME input workflow.
 
 ## Client Workspace Layout
 
@@ -138,16 +97,16 @@ Create a separate workspace per client:
 
 Keep raw/internal artifacts in the workspace. Show users links only when they are reviewable or actionable.
 
-## Telegram Onboarding Contract
+## Discord Onboarding Contract
 
-When a client is added from Telegram, SEO OS must complete the visible setup loop before replying:
+When a client is added via Discord, SEO OS must complete the visible setup loop before replying:
 
 1. create or update the client registry/dashboard row,
 2. create the per-client Hermes profile using the client name/slug,
 3. create the per-client workspace and starter docs,
 4. queue setup tasks and setup-needed jobs,
-5. bind the Telegram topic target, and
-6. send a concise confirmation back to the same Telegram topic.
+5. bind the Discord channel/thread target, and
+6. send a concise confirmation back to the same Discord channel/thread.
 
 The confirmation should say the dashboard was updated, which profile/workspace was created, and what the next setup step is.
 
@@ -163,11 +122,11 @@ Profiles should separate memory, context, credentials, and routing.
 
 ## Daily Operating Rhythm
 
-1. Daily refresh updates the Google Sheet from current data.
+1. Daily refresh updates the dashboard from current data.
 2. Schedule checks update after cron jobs run.
 3. New approvals/tasks are added as work happens.
 4. The Activity Log records important outcomes only.
-5. Telegram receives concise summaries only when attention is needed.
+5. Discord receives concise summaries only when attention is needed.
 
 Use script-only jobs for simple checks. Use cheap models for short summaries. Use stronger models for strategy and nuanced recommendations.
 
@@ -186,11 +145,9 @@ These defaults apply to content drafts unless a client's workspace overrides the
 - write in the client's voice, not the template author's
 - avoid generic AI writing, hype, unsupported claims, keyword stuffing, and em dashes
 
-See `docs/default-content-and-image-guidelines.md` for the full reusable policy.
-
 ## Content Writing and Publishing Modes
 
-Default community mode: Google Docs draft-first.
+Default mode: Google Doc draft-first.
 
 SEO OS does not need direct CMS access to be useful. For most users, create a Google Doc draft with the recommended title, meta description, H1, content draft, internal links, and notes. The user or their web person publishes manually.
 
@@ -201,23 +158,7 @@ Supported modes:
 - `wordpress_draft`: optional advanced mode. Only after the user deliberately connects WordPress MCP/API access. Creates drafts only, not published posts.
 - `manual_only`: recommendations only. No draft or CMS writes.
 
-Do not make WordPress or Astro automation the default for community users. Treat direct publishing as an advanced, approval-gated workflow.
-
-## Image Style Guide Onboarding
-
-Ask during onboarding whether the user wants Hermes to generate an image style guide for the website. This is recommended because feature images should stay visually consistent across the site.
-
-The guide should live at:
-
-```text
-~/seo-sites/<domain>/image-style-guide.md
-```
-
-It should define aspect ratio, palette, mood, illustration/photo/abstract direction, motifs, text policy, negative prompts, examples to match, and examples to avoid. Do not copy another brand's visual style unless the user explicitly requests it.
-
-See `templates/onboarding/image-style-guide.md`.
-
-See `docs/content-writing-and-publishing.md` for the full policy.
+Do not make WordPress or Astro automation the default. Treat direct publishing as an advanced, approval-gated workflow.
 
 ## Approval Rules
 
@@ -250,7 +191,7 @@ Do not make dropdowns directly execute risky production work until the workflow 
 
 ## Client Expertise Intake Workflow
 
-Do not give clients direct Hermes or Telegram access. Use email or a simple form.
+Do not give clients direct Hermes or Discord access. Use email or a simple form.
 
 Flow:
 
@@ -272,7 +213,7 @@ Distill client answers into `client-knowledge/`:
 
 ## Review Management Workflow
 
-For local SEO clients, reviews can be monitored through Zernio or another GBP/review integration.
+For local SEO clients, reviews can be monitored through a GBP/review integration.
 
 Positive reviews:
 
@@ -293,7 +234,7 @@ Negative reviews:
 
 ## Verification Checklist
 
-- [ ] User-facing tabs avoid raw IDs and VPS paths.
+- [ ] Dashboard rows avoid raw IDs and VPS paths.
 - [ ] Metrics use the same date window before comparing clients.
 - [ ] Risky actions are approval-gated.
 - [ ] Client workspaces are separated.

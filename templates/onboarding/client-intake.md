@@ -20,7 +20,7 @@ GSC property:
 
 GA4 property:
 
-Telegram topic target:
+Discord channel/thread target:
 
 CMS/platform:
 

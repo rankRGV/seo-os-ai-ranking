@@ -99,20 +99,20 @@ def upsert_dashboard_client(args: argparse.Namespace, client_id: str, domain: st
     if args.dry_run:
         return {'attempted': True, 'dry_run': True, 'db': str(db), 'client_id': client_id}
     client_name = args.client_name
-    telegram_target = args.telegram_target or 'not_bound'
+    channel_target = args.discord_channel or 'not_bound'
     try:
         with sqlite3.connect(db) as conn:
             conn.execute('PRAGMA foreign_keys=ON')
             existing = conn.execute('SELECT id FROM clients WHERE domain=? OR domain=?', (domain, f'www.{domain}')).fetchone()
             if existing:
                 client_id = existing[0]
-            conn.execute("""INSERT INTO clients (id,name,domain,role,status,health_score,hermes_profile,telegram_topic,gsc_status,ga4_status,repo_status,zernio_status,workspace,created_at,updated_at)
+            conn.execute("""INSERT INTO clients (id,name,domain,role,status,health_score,hermes_profile,channel_target,gsc_status,ga4_status,repo_status,zernio_status,workspace,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, domain=excluded.domain, role=excluded.role, status=excluded.status,
-                health_score=excluded.health_score, hermes_profile=excluded.hermes_profile, telegram_topic=excluded.telegram_topic,
+                health_score=excluded.health_score, hermes_profile=excluded.hermes_profile, channel_target=excluded.channel_target,
                 gsc_status=excluded.gsc_status, ga4_status=excluded.ga4_status, repo_status=excluded.repo_status, zernio_status=excluded.zernio_status,
                 workspace=excluded.workspace, updated_at=excluded.updated_at""", (
-                    client_id, client_name, domain, args.client_type, 'setup', 40, profile, telegram_target,
+                    client_id, client_name, domain, args.client_type, 'setup', 40, profile, channel_target,
                     'connected' if args.gsc_property else 'needs_setup',
                     'connected' if args.ga4_property else 'needs_setup',
                     'needs_setup' if not args.repo else 'connected',
@@ -129,7 +129,7 @@ def upsert_dashboard_client(args: argparse.Namespace, client_id: str, domain: st
                 'Waiting for analytics verification.', 'SEO OS managed scheduler'
             ))
             conn.execute('INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)', (
-                dashboard_uid('ev_onboarded', client_id), client_id, 'telegram' if args.telegram_target else 'setup', 'client_onboarded', 'setup_needed',
+                dashboard_uid('ev_onboarded', client_id), client_id, 'discord' if args.discord_channel else 'setup', 'client_onboarded', 'setup_needed',
                 f'{client_name} added to SEO OS dashboard.', 'Verify analytics access and approve the first safe workflow.', str(workspace / 'site-profile.md'), now
             ))
             conn.execute('INSERT OR REPLACE INTO agent_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', (
@@ -143,24 +143,14 @@ def upsert_dashboard_client(args: argparse.Namespace, client_id: str, domain: st
         return {'attempted': True, 'ok': False, 'db': str(db), 'error': str(exc)}
 
 
-def send_telegram_confirmation(args: argparse.Namespace, profile: str, workspace: Path, dashboard_result: dict) -> dict:
-    if args.no_send_confirmation or not args.telegram_target:
-        return {'attempted': False, 'ok': True, 'message': 'telegram confirmation skipped'}
-    message = (
+def build_discord_message(args: argparse.Namespace, profile: str, workspace: Path, dashboard_result: dict) -> str:
+    return (
         f"SEO OS onboarding complete: {args.client_name}\n\n"
         f"Dashboard updated: {'yes' if dashboard_result.get('ok') or dashboard_result.get('dry_run') else 'check needed'}\n"
         f"Hermes profile: {profile}\n"
         f"Workspace: {workspace}\n\n"
         "Next step: verify GSC/GA4 and approve the first safe SEO workflow. Production changes remain separately approval-gated."
     )
-    cmd = ['hermes', 'send', '--to', args.telegram_target, message]
-    if args.dry_run:
-        return {'attempted': True, 'dry_run': True, 'cmd': cmd, 'message': message}
-    try:
-        cp = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return {'attempted': True, 'ok': cp.returncode == 0, 'returncode': cp.returncode, 'stdout': cp.stdout[-1000:], 'stderr': cp.stderr[-1000:]}
-    except Exception as exc:
-        return {'attempted': True, 'ok': False, 'error': str(exc)}
 
 
 def setup(args: argparse.Namespace) -> dict:
@@ -230,7 +220,7 @@ Created: {now}
 - Hermes profile: {profile}
 - Workspace: {workspace}
 - Google Sheet ID: {args.sheet_id or 'TODO'}
-- Telegram target/topic: {args.telegram_target or 'TODO'}
+- Discord channel/thread: {args.discord_channel or 'TODO'}
 - GSC property: {args.gsc_property or 'TODO'}
 - GA4 property: {args.ga4_property or 'TODO'}
 - First workflow: {args.first_workflow}
@@ -356,7 +346,7 @@ Use this workspace for SEO/GEO/LLM SEO work on {args.site_url or 'https://' + do
         'profile': profile,
         'workspace': str(workspace),
         'sheet_id': args.sheet_id,
-        'telegram_target': args.telegram_target,
+        'discord_channel': args.discord_channel,
         'enabled_workflows': args.enable_workflow,
         'onboarding_status': 'setup_needed',
         'created_at': now,
@@ -364,12 +354,13 @@ Use this workspace for SEO/GEO/LLM SEO work on {args.site_url or 'https://' + do
     write_if_missing(workspace / 'client-config.json', json.dumps(config, indent=2), args.dry_run)
 
     profile_result = {'attempted': False}
-    should_create_profile = not args.no_create_profile and (args.create_profile or bool(args.telegram_target))
+    should_create_profile = not args.no_create_profile and (args.create_profile or bool(args.discord_channel))
     if should_create_profile:
         profile_result = create_profile(profile, args.dry_run)
 
     dashboard_result = upsert_dashboard_client(args, client_slug, domain, profile, workspace, now)
-    telegram_result = send_telegram_confirmation(args, profile, workspace, dashboard_result)
+
+    discord_message = build_discord_message(args, profile, workspace, dashboard_result)
 
     return {
         'ok': True,
@@ -377,7 +368,7 @@ Use this workspace for SEO/GEO/LLM SEO work on {args.site_url or 'https://' + do
         'profile': profile,
         'profile_result': profile_result,
         'dashboard_result': dashboard_result,
-        'telegram_result': telegram_result,
+        'discord_message': discord_message,
         'dry_run': args.dry_run,
     }
 
@@ -405,12 +396,11 @@ def main() -> None:
     parser.add_argument('--workspace')
     parser.add_argument('--profile')
     parser.add_argument('--sheet-id')
-    parser.add_argument('--telegram-target')
+    parser.add_argument('--discord-channel', help='Discord channel or thread target (e.g. discord:#channel-name or discord:channel_id:thread_id)')
     parser.add_argument('--enable-workflow', action='append', default=[])
-    parser.add_argument('--create-profile', action='store_true', help='Create the per-client Hermes profile. Also enabled automatically when --telegram-target is provided unless --no-create-profile is set.')
-    parser.add_argument('--no-create-profile', action='store_true', help='Do not create a Hermes profile, even for Telegram onboarding.')
+    parser.add_argument('--create-profile', action='store_true', help='Create the per-client Hermes profile. Also enabled automatically when --discord-channel is provided unless --no-create-profile is set.')
+    parser.add_argument('--no-create-profile', action='store_true', help='Do not create a Hermes profile, even for Discord onboarding.')
     parser.add_argument('--dashboard-db', help='Path to SEO OS dashboard SQLite DB. Defaults to /root/seo-os-dashboard/data/seo-os.sqlite when present.')
-    parser.add_argument('--no-send-confirmation', action='store_true', help='Do not send the Telegram onboarding completion message.')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     result = setup(args)

@@ -18,11 +18,11 @@ Created: {{created_at}}
 
 ## 2. Routing
 
-- [ ] Telegram target recorded
-- [ ] Outbound test sent to the intended topic
-- [ ] Operator confirmed visible topic name
-- [ ] Inbound standalone topic message received
-- [ ] Binding saved with chat_id and thread_id
+- [ ] Discord channel/thread target recorded
+- [ ] Outbound test sent to the intended channel/thread
+- [ ] Operator confirmed visible channel/thread name
+- [ ] Inbound standalone channel/thread message received
+- [ ] Binding saved with channel_id and thread_id
 
 ## 3. Data access
 
@@ -81,5 +81,5 @@ Recommended first workflow:
 - [ ] First opportunity selected
 - [ ] Approval request created
 - [ ] Dashboard approval tested
-- [ ] Telegram confirmation sent to correct topic
+- [ ] Discord confirmation sent to correct channel
 - [ ] Ready task assigned to correct profile

@@ -5,7 +5,7 @@ SEO OS is a reusable Hermes-based operating system for SEO agency work.
 ## Components
 
 ```text
-Telegram / CLI
+Discord / CLI
   ↓
 Hermes operator profile
   ↓ routes work to
@@ -17,7 +17,7 @@ SQLite operational state
   ↓ powers
 Custom SEO OS dashboard
   ↓ produces
-Google Docs / clean HTML reports / optional Sheet exports
+Google Docs / clean HTML reports
 ```
 
 ## Roles
@@ -27,7 +27,7 @@ Google Docs / clean HTML reports / optional Sheet exports
 | Custom dashboard | Main human-readable operating board |
 | SQLite | Local operational state for clients, jobs, approvals, tasks, reports, and activity |
 | Hermes | Worker that refreshes data, drafts tasks, writes reports, and requests approval |
-| Telegram | Operator notification and conversation layer |
+| Discord | Operator notification and conversation layer |
 | Hermes profile | Client-specific memory/context/tool routing |
 | VPS workspace | Internal data, drafts, logs, reports, scripts, and client knowledge |
 | Google Docs / HTML | Polished reports and client-facing deliverables |
@@ -37,16 +37,16 @@ Google Docs / clean HTML reports / optional Sheet exports
 
 Every operational row must have a `client_id`. Every tab, Sheet update script, dashboard API query, and frontend view must filter by the selected `client_id`. Selecting a client means the user sees only that client's CTR tests, jobs, content items, approvals, opportunities, tasks, reports, activity, and performance. All-client/global rows are shown only in the All Clients view.
 
-Telegram onboarding must be atomic from the operator's perspective:
+Discord onboarding must be atomic from the operator's perspective:
 
 ```text
-Telegram setup message
+Discord setup message
   -> create/update client registry row
   -> create per-client Hermes profile
   -> create per-client workspace
   -> queue setup tasks/jobs
   -> update dashboard
-  -> send Telegram confirmation to the same topic
+  -> send Discord confirmation to the same channel/thread
 ```
 
 Before inserting a client, check existing clients by domain and common variants so `my-inclusion` and `myinclusion` style slug differences do not create duplicates.
