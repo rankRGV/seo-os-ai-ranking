@@ -132,7 +132,8 @@ function commandCenter(){
     ${section('High-Impact SEO Opportunities','High impressions, weak clicks — ranked by impressions','trend','green',undefined, simpleTable(['Client','Page','Problem','Priority','Impr.','Clicks','CTR','Pos.'], oppRows), '<button class="link-action" data-open-opps>View all →</button>')}
     ${section('Client Health Summary','Workload and next action per site','building','blue',undefined, simpleTable(['Client','Status','Appr.','Tasks','Jobs','Opps','Connections','Recommended next action'], healthRows))}
     ${commandPreviews(d)}
-    ${section('Agent Activity','Important outcomes only — not a Discord transcript','pulse','mutedIcon',undefined, simpleTable(['Time','Client','Source','Type','What happened','Next action'], activities))}`;
+    ${section('Agent Activity','Important outcomes only — not a Discord transcript','pulse','mutedIcon',undefined, simpleTable(['Time','Client','Source','Type','What happened','Next action'], activities))}
+    ${section('Quick Actions','Send updates to Discord, trigger data refresh, and manage notifications','settings','blue',undefined, '<button class="btn primary" id="notifyDiscordBtn">Send to Discord</button> <span class="muted" style="font-size:12px">Sends a summary to the #seo-clients channel</span>')}`;
   setTimeout(()=>document.querySelectorAll('[data-open-approvals]').forEach(b=>b.onclick=()=>{state.section='Approvals';render()}),0);
   setTimeout(()=>document.querySelectorAll('[data-open-opps]').forEach(b=>b.onclick=()=>{state.section='Opportunities';render()}),0);
   setTimeout(()=>document.querySelectorAll('[data-open-schedule]').forEach(b=>b.onclick=()=>{state.section='Schedule';render()}),0);
@@ -310,5 +311,12 @@ function toast(msg, error=false){
 $('#refreshBtn').onclick = async () => {
   try { const r = await api('/api/refresh',{method:'POST',body:JSON.stringify({client_id:state.client})}); state.data=r.summary; toast('Dashboard data refreshed'); render(); }
   catch(e){ toast('Refresh failed', true); console.error(e); }
+};
+$('#notifyDiscordBtn').onclick = async () => {
+  const clientName = clientName(state.client);
+  const kpis = state.data.kpis;
+  const msg = `📊 **SEO OS Update — ${clientName}**\n\nSites monitored: ${kpis.sites_monitored} | Open tasks: ${kpis.open_tasks} | High-impact opps: ${kpis.high_impact_opportunities} | Active jobs: ${kpis.active_jobs}\n\n⚠️ ${kpis.pending_approvals} pending approval(s) need your review.`;
+  try { await api('/api/discord/notify',{method:'POST',body:JSON.stringify({message:msg,client_id:state.client})}); toast('Sent to Discord ✓'); }
+  catch(e){ toast('Discord send failed', true); console.error(e); }
 };
 load().catch(e => { console.error(e); $('#view').innerHTML = `<div class="warning">Could not load SEO OS data. Is server.py running?</div>`; });

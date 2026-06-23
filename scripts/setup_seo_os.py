@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -362,6 +363,20 @@ Use this workspace for SEO/GEO/LLM SEO work on {args.site_url or 'https://' + do
 
     discord_message = build_discord_message(args, profile, workspace, dashboard_result)
 
+    # Send to Discord via dashboard API
+    discord_result = {'attempted': False, 'ok': True, 'message': 'skipped — set DASHBOARD_URL to auto-send'}
+    if not args.dry_run:
+        dashboard_url = os.environ.get('DASHBOARD_URL', 'http://127.0.0.1:8787')
+        try:
+            import urllib.request as _req
+            data = json.dumps({"message": discord_message, "client_id": client_slug}).encode()
+            req_obj = _req.Request(f"{dashboard_url}/api/discord/notify",
+                data=data, headers={"Content-Type": "application/json"}, method="POST")
+            resp = _req.urlopen(req_obj, timeout=10)
+            discord_result = {'attempted': True, 'ok': True, 'status': resp.status}
+        except Exception as e:
+            discord_result = {'attempted': True, 'ok': False, 'error': str(e)}
+
     return {
         'ok': True,
         'workspace': str(workspace),
@@ -369,6 +384,7 @@ Use this workspace for SEO/GEO/LLM SEO work on {args.site_url or 'https://' + do
         'profile_result': profile_result,
         'dashboard_result': dashboard_result,
         'discord_message': discord_message,
+        'discord_result': discord_result,
         'dry_run': args.dry_run,
     }
 

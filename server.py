@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS clients (
   health_score INTEGER NOT NULL,
   hermes_profile TEXT NOT NULL,
   channel_target TEXT NOT NULL,
+  discord_thread_id TEXT NOT NULL DEFAULT '',
   gsc_status TEXT NOT NULL,
   ga4_status TEXT NOT NULL,
   repo_status TEXT NOT NULL,
@@ -183,9 +184,9 @@ def seed_db(conn: sqlite3.Connection) -> None:
     """Seed fake demo data only. Replace this through setup/onboarding in real installs."""
     t = now()
     clients = [
-        ("demo-local", "Demo Local Roofing", "demo-roofing.example", "Local SEO client", "active", 82, "demo-local-seo", "not_bound", "connected", "connected", "connected", "not_connected", "/opt/seo-os/workspaces/demo-roofing"),
-        ("demo-saas", "Demo SaaS Company", "demo-saas.example", "B2B SaaS client", "active", 76, "demo-saas-seo", "not_bound", "connected", "needs_setup", "connected", "not_applicable", "/opt/seo-os/workspaces/demo-saas"),
-        ("setup-client", "New Client Template", "new-client.example", "Template client", "setup", 45, "new-client-seo", "not_bound", "needs_setup", "needs_setup", "needs_setup", "needs_setup", "/opt/seo-os/workspaces/new-client"),
+        ("demo-local", "Demo Local Roofing", "demo-roofing.example", "Local SEO client", "active", 82, "demo-local-seo", "not_bound", "", "connected", "connected", "connected", "not_connected", "/opt/seo-os/workspaces/demo-roofing"),
+        ("demo-saas", "Demo SaaS Company", "demo-saas.example", "B2B SaaS client", "active", 76, "demo-saas-seo", "not_bound", "", "connected", "needs_setup", "connected", "not_applicable", "/opt/seo-os/workspaces/demo-saas"),
+        ("setup-client", "New Client Template", "new-client.example", "Template client", "setup", 45, "new-client-seo", "not_bound", "", "needs_setup", "needs_setup", "needs_setup", "needs_setup", "/opt/seo-os/workspaces/new-client"),
     ]
     conn.executemany("INSERT INTO clients VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [(*c, t, t) for c in clients])
 
@@ -247,6 +248,8 @@ def seed_db(conn: sqlite3.Connection) -> None:
         "model_policy": "Data pulls use no model. Summaries and labeling use a cheap configured model. Strategic plans use a stronger model only after approval.",
         "safe_actions": "Dashboard approvals update state and create bounded tasks. Production actions need separate explicit approval.",
         "onboarding_goal": "User connects GSC, GA4, and review data. SEO OS handles managed refresh jobs and approval loops.",
+        "discord_webhook_url": "https://discord.com/api/webhooks/1504130721009373315/yYB7q3GPViCkjCToom70OZG0L-6rPiYdv1uqJQbIDGVUP7oSN0XLewHjCpXqh53p4DpX",
+        "discord_channel_id": "1518799542554984522",
     }
     conn.executemany("INSERT INTO settings VALUES (?,?)", settings.items())
 
@@ -383,6 +386,48 @@ class Handler(SimpleHTTPRequestHandler):
                 ))
                 conn.commit()
                 self.json_response({"ok": True, "summary": summary(conn, client_id)})
+            return
+        if parsed.path == "/api/discord/notify":
+            message = body.get("message", "").strip()
+            client_id = body.get("client_id", "all")
+            if not message:
+                self.json_response({"ok": False, "error": "message is required"}, 400)
+                return
+            # Look up discord webhook from settings
+            with connect() as conn:
+                webhook_row = one(conn, "SELECT value FROM settings WHERE key='discord_webhook_url'")
+                thread_row = None
+                if client_id != "all":
+                    thread_row = one(conn, "SELECT discord_thread_id, name FROM clients WHERE id=?", (client_id,))
+            webhook_url = webhook_row["value"] if webhook_row else ""
+            if not webhook_url:
+                self.json_response({"ok": False, "error": "Discord webhook URL not configured in Settings"}, 500)
+                return
+            # Build payload
+            payload = {"content": message}
+            if thread_row and thread_row.get("discord_thread_id"):
+                payload["thread_name"] = f"{thread_row['name']} — Updates"
+            # Send to Discord
+            try:
+                import urllib.request as _req
+                data = json.dumps(payload).encode()
+                headers = {
+                    "Content-Type": "application/json",
+                    "User-Agent": "SEO-OS-Dashboard/1.0"
+                }
+                req_obj = _req.Request(webhook_url, data=data, headers=headers, method="POST")
+                _req.urlopen(req_obj, timeout=10)
+                # Log the notification
+                with connect() as conn:
+                    t = now()
+                    conn.execute("INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)", (
+                        uid("ev"), client_id, "dashboard", "discord_notification", "complete",
+                        message[:200], "Sent to Discord webhook.", "", t,
+                    ))
+                    conn.commit()
+                self.json_response({"ok": True})
+            except Exception as e:
+                self.json_response({"ok": False, "error": str(e)}, 500)
             return
         if parsed.path.startswith("/api/clients/") and parsed.path.endswith("/delete"):
             client_id = parsed.path.split("/")[3]
