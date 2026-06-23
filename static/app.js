@@ -304,19 +304,24 @@ function renderView(){
   const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'Agent Tasks':tasksView,'Content':contentView,'Schedule':scheduleView,'CTR Tests':ctrView,'Activity Log':activityView,'Reports':reportsView,'Settings':settingsView};
   $('#view').innerHTML = (map[state.section] || commandCenter)();
 }
-function render(){ renderNav(); renderTabs(); renderContext(); renderView(); }
+function render(){ renderNav(); renderTabs(); renderContext(); renderView(); bindNotifyBtn(); }
 function toast(msg, error=false){
   const el=document.createElement('div'); el.className=`toast ${error?'error':''}`; el.textContent=msg; document.body.appendChild(el); setTimeout(()=>el.remove(),2600);
+}
+function bindNotifyBtn(){
+  const btn = $('#notifyDiscordBtn');
+  if(btn){
+    btn.onclick = async () => {
+      const cName = clientName(state.client);
+      const kpis = state.data.kpis;
+      const msg = `📊 **SEO OS Update — ${cName}**\n\nSites monitored: ${kpis.sites_monitored} | Open tasks: ${kpis.open_tasks} | High-impact opps: ${kpis.high_impact_opportunities} | Active jobs: ${kpis.active_jobs}\n\n⚠️ ${kpis.pending_approvals} pending approval(s) need your review.`;
+      try { await api('/api/discord/notify',{method:'POST',body:JSON.stringify({message:msg,client_id:state.client})}); toast('Sent to Discord ✓'); }
+      catch(e){ toast('Discord send failed', true); console.error(e); }
+    };
+  }
 }
 $('#refreshBtn').onclick = async () => {
   try { const r = await api('/api/refresh',{method:'POST',body:JSON.stringify({client_id:state.client})}); state.data=r.summary; toast('Dashboard data refreshed'); render(); }
   catch(e){ toast('Refresh failed', true); console.error(e); }
-};
-$('#notifyDiscordBtn').onclick = async () => {
-  const clientName = clientName(state.client);
-  const kpis = state.data.kpis;
-  const msg = `📊 **SEO OS Update — ${clientName}**\n\nSites monitored: ${kpis.sites_monitored} | Open tasks: ${kpis.open_tasks} | High-impact opps: ${kpis.high_impact_opportunities} | Active jobs: ${kpis.active_jobs}\n\n⚠️ ${kpis.pending_approvals} pending approval(s) need your review.`;
-  try { await api('/api/discord/notify',{method:'POST',body:JSON.stringify({message:msg,client_id:state.client})}); toast('Sent to Discord ✓'); }
-  catch(e){ toast('Discord send failed', true); console.error(e); }
 };
 load().catch(e => { console.error(e); $('#view').innerHTML = `<div class="warning">Could not load SEO OS data. Is server.py running?</div>`; });
