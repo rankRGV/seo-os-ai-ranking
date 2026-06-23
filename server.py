@@ -393,7 +393,6 @@ class Handler(SimpleHTTPRequestHandler):
             if not message:
                 self.json_response({"ok": False, "error": "message is required"}, 400)
                 return
-            # Look up discord webhook from settings
             with connect() as conn:
                 webhook_row = one(conn, "SELECT value FROM settings WHERE key='discord_webhook_url'")
                 thread_row = None
@@ -403,21 +402,15 @@ class Handler(SimpleHTTPRequestHandler):
             if not webhook_url:
                 self.json_response({"ok": False, "error": "Discord webhook URL not configured in Settings"}, 500)
                 return
-            # Build payload
             payload = {"content": message}
             if thread_row and thread_row.get("discord_thread_id"):
                 payload["thread_name"] = f"{thread_row['name']} — Updates"
-            # Send to Discord
             try:
                 import urllib.request as _req
                 data = json.dumps(payload).encode()
-                headers = {
-                    "Content-Type": "application/json",
-                    "User-Agent": "SEO-OS-Dashboard/1.0"
-                }
+                headers = {"Content-Type": "application/json", "User-Agent": "SEO-OS-Dashboard/1.0"}
                 req_obj = _req.Request(webhook_url, data=data, headers=headers, method="POST")
                 _req.urlopen(req_obj, timeout=10)
-                # Log the notification
                 with connect() as conn:
                     t = now()
                     conn.execute("INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)", (
@@ -426,6 +419,39 @@ class Handler(SimpleHTTPRequestHandler):
                     ))
                     conn.commit()
                 self.json_response({"ok": True})
+            except Exception as e:
+                self.json_response({"ok": False, "error": str(e)}, 500)
+            return
+        if parsed.path == "/api/discord/thread":
+            client_id = body.get("client_id", "").strip()
+            if not client_id or client_id == "all":
+                self.json_response({"ok": False, "error": "client_id is required"}, 400)
+                return
+            with connect() as conn:
+                client = one(conn, "SELECT * FROM clients WHERE id=?", (client_id,))
+                if not client:
+                    self.json_response({"ok": False, "error": "Client not found"}, 404)
+                    return
+                if client.get("discord_thread_id"):
+                    self.json_response({"ok": True, "thread_id": client["discord_thread_id"], "message": "Thread already exists"})
+                    return
+                bot_token_row = one(conn, "SELECT value FROM settings WHERE key='discord_bot_token'")
+                channel_row = one(conn, "SELECT value FROM settings WHERE key='discord_channel_id'")
+            if not bot_token_row or not channel_row:
+                self.json_response({"ok": False, "error": "Discord bot token or channel not configured"}, 500)
+                return
+            try:
+                import urllib.request as _req
+                payload = json.dumps({"name": f"📋 {client['name']}", "type": 11, "auto_archive_duration": 1440}).encode()
+                th_headers = {"Authorization": f"Bot {bot_token_row['value']}", "Content-Type": "application/json", "User-Agent": "SEO-OS-Dashboard/1.0"}
+                req_obj = _req.Request(f"https://discord.com/api/v10/channels/{channel_row['value']}/threads", data=payload, headers=th_headers, method="POST")
+                resp = _req.urlopen(req_obj, timeout=10)
+                thread_data = json.loads(resp.read())
+                thread_id = thread_data["id"]
+                with connect() as conn:
+                    conn.execute("UPDATE clients SET discord_thread_id=? WHERE id=?", (thread_id, client_id))
+                    conn.commit()
+                self.json_response({"ok": True, "thread_id": thread_id, "thread_name": thread_data.get("name", "")})
             except Exception as e:
                 self.json_response({"ok": False, "error": str(e)}, 500)
             return

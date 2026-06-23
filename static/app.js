@@ -133,7 +133,7 @@ function commandCenter(){
     ${section('Client Health Summary','Workload and next action per site','building','blue',undefined, simpleTable(['Client','Status','Appr.','Tasks','Jobs','Opps','Connections','Recommended next action'], healthRows))}
     ${commandPreviews(d)}
     ${section('Agent Activity','Important outcomes only — not a Discord transcript','pulse','mutedIcon',undefined, simpleTable(['Time','Client','Source','Type','What happened','Next action'], activities))}
-    ${section('Quick Actions','Send updates to Discord, trigger data refresh, and manage notifications','settings','blue',undefined, '<button class="btn primary" id="notifyDiscordBtn">Send to Discord</button> <span class="muted" style="font-size:12px">Sends a summary to the #seo-clients channel</span>')}`;
+    ${section('Quick Actions','Send updates to Discord, trigger data refresh, and manage notifications','settings','blue',undefined, '<button class="btn primary" id="notifyDiscordBtn">Send to Discord</button> <button class="btn" id="createThreadBtn">Create Client Thread</button> <span class="muted" style="font-size:12px">Sends notifications and creates per-client threads in Discord</span>')}`;
   setTimeout(()=>document.querySelectorAll('[data-open-approvals]').forEach(b=>b.onclick=()=>{state.section='Approvals';render()}),0);
   setTimeout(()=>document.querySelectorAll('[data-open-opps]').forEach(b=>b.onclick=()=>{state.section='Opportunities';render()}),0);
   setTimeout(()=>document.querySelectorAll('[data-open-schedule]').forEach(b=>b.onclick=()=>{state.section='Schedule';render()}),0);
@@ -317,6 +317,17 @@ function bindNotifyBtn(){
       const msg = `📊 **SEO OS Update — ${cName}**\n\nSites monitored: ${kpis.sites_monitored} | Open tasks: ${kpis.open_tasks} | High-impact opps: ${kpis.high_impact_opportunities} | Active jobs: ${kpis.active_jobs}\n\n⚠️ ${kpis.pending_approvals} pending approval(s) need your review.`;
       try { await api('/api/discord/notify',{method:'POST',body:JSON.stringify({message:msg,client_id:state.client})}); toast('Sent to Discord ✓'); }
       catch(e){ toast('Discord send failed', true); console.error(e); }
+    };
+  }
+  const threadBtn = $('#createThreadBtn');
+  if(threadBtn){
+    threadBtn.onclick = async () => {
+      if(state.client === 'all'){ toast('Select a specific client first', true); return; }
+      try {
+        const r = await api('/api/discord/thread',{method:'POST',body:JSON.stringify({client_id:state.client})});
+        if(r.thread_id) toast(`Thread created: ${r.thread_name} ✓`);
+        else toast(r.message || 'Thread exists', true);
+      }catch(e){ toast('Thread creation failed', true); console.error(e); }
     };
   }
 }
