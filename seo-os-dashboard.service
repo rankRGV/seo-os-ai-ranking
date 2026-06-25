@@ -1,0 +1,33 @@
+[Unit]
+Description=SEO OS Command Center Dashboard
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/seo-os-dashboard
+Environment=PATH=/usr/local/bin:/usr/bin:/root/.local/bin
+Environment=SEO_OS_DB_PATH=/root/seo-os-dashboard/data/seo-os.sqlite
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 server.py --host 127.0.0.1 --port 8787
+ExecStartPost=/bin/bash -c 'sleep 2 && /root/seo-os-dashboard/scripts/healthcheck.sh || exit 1'
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=seo-os-dashboard
+
+# Watchdog: systemd will restart if healthcheck fails
+WatchdogSec=60
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/root/seo-os-dashboard/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

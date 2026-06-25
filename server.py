@@ -193,6 +193,24 @@ def uid(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
 
+def backup_db() -> str | None:
+    """Create a timestamped backup of the SQLite DB. Returns backup path or None."""
+    import shutil
+    db = Path(DB_PATH)
+    if not db.exists():
+        return None
+    backup_dir = Path("backups")
+    backup_dir.mkdir(exist_ok=True)
+    ts = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_path = backup_dir / f"seo-os_{ts}.sqlite"
+    shutil.copy2(db, backup_path)
+    # Keep only last 7 backups
+    backups = sorted(backup_dir.glob("seo-os_*.sqlite"), key=lambda p: p.stat().st_mtime)
+    for old in backups[:-7]:
+        old.unlink()
+    return str(backup_path)
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create all required tables/indexes if missing. Safe to call repeatedly."""
     conn.executescript(SCHEMA)
@@ -611,6 +629,16 @@ class Handler(SimpleHTTPRequestHandler):
                     [sys.executable, "scripts/gsc_data_pull.py", "--days", "28"],
                     capture_output=True, text=True, cwd=str(ROOT), timeout=120
                 )
+                # Audit the pull
+                with connect() as conn:
+                    t = now()
+                    conn.execute("INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)", (
+                        uid("ev"), "all", "gsc_pull", "data_refresh", "complete",
+                        f"GSC data pull completed (exit {result.returncode})",
+                        result.stdout.strip()[:200] or result.stderr.strip()[:200] or "No output",
+                        "", t,
+                    ))
+                    conn.commit()
                 self.json_response({
                     "ok": result.returncode == 0,
                     "stdout": result.stdout.strip(),
@@ -800,6 +828,8 @@ class Handler(SimpleHTTPRequestHandler):
                     self.json_response({"ok": False, "error": "Client not found"}, 404)
                     return
                 t = now()
+                # Backup before destructive delete
+                backup_path = backup_db()
                 deleted_counts = {}
                 for table in ("metrics_snapshots", "opportunities", "approval_requests", "agent_tasks", "managed_jobs", "artifacts"):
                     cur = conn.execute(f"DELETE FROM {table} WHERE client_id=?", (client_id,))
@@ -807,8 +837,7 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.execute("INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)", (
                     uid("ev"), "all", "dashboard", "client_deleted", "complete",
                     f"Deleted client from SEO OS dashboard: {client['name']}",
-                    "All client-scoped prototype rows were removed. Production v1 should archive before destructive delete.",
-                    "", t,
+                    f"All client-scoped rows removed. Backup: {backup_path}", "", t,
                 ))
                 cur = conn.execute("DELETE FROM activity_events WHERE client_id=?", (client_id,))
                 deleted_counts["activity_events"] = cur.rowcount

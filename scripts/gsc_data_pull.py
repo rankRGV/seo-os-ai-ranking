@@ -25,7 +25,9 @@ def get_gsc_site_for_client(client_id, domain):
 
 def gsc_request(token, site_url, payload):
     """Make a GSC searchAnalytics.query request with auto token refresh."""
-    url = f"{GSC_API_BASE}/{site_url}/searchAnalytics/query"
+    # URL-encode site_url (e.g. "https://rankrgv.com/" → "https%3A%2F%2Frankrgv.com%2F")
+    encoded_site = urllib.parse.quote(site_url, safe="")
+    url = f"{GSC_API_BASE}/{encoded_site}/searchAnalytics/query"
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, method="POST", headers={
         "Authorization": f"Bearer {token}",
