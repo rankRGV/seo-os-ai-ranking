@@ -397,13 +397,11 @@ def summary(conn: sqlite3.Connection, client_id: str = "all", days: int = 0, met
     if metric_days > 0:
         period_label = f"Last {metric_days} days"
         filtered = [m for m in metrics if m.get("period_label") == period_label]
-        if filtered:
-            metrics = filtered
+        metrics = filtered  # return empty if no data for this period yet
     elif days > 0:
         period_label = f"Last {days} days"
         filtered = [m for m in metrics if m.get("period_label") == period_label]
-        if filtered:
-            metrics = filtered
+        metrics = filtered  # return empty if no data for this period yet
     approvals = rows(conn, "SELECT * FROM approval_requests ORDER BY CASE status WHEN 'needs_review' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, updated_at DESC")
     # Filter opportunities by date range if days specified
     if days > 0:
