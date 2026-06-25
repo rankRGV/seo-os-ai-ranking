@@ -2,7 +2,7 @@ const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
   ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Activity Log','pulse'], ['Settings','settings']
 ];
-let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', briefSearch:'', schedView:'calendar', schedRange:'7', perfRange:28, reportClient:null, data:null, prospectFilter:'all', prospectSearch:'', sidebarCollapsed:false };
+let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', briefSearch:'', schedView:'calendar', schedRange:'7', perfRange:28, reportClient:null, data:null, prospectFilter:'all', prospectSearch:'', colFilters:{}, sidebarCollapsed:false };
 
 const $ = sel => document.querySelector(sel);
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -564,6 +564,7 @@ function prospectsView(){
   const stats = window._prospectStats || { by_status: {}, by_pipeline: {}, by_city: {} };
   const currentFilter = state.prospectFilter || 'all';
   const searchQ = state.prospectSearch || '';
+  const colFilters = state.colFilters || {};
 
   // Filter prospects
   let prospects = allProspects;
@@ -579,6 +580,12 @@ function prospectsView(){
       (p.niche||'').toLowerCase().includes(q)
     );
   }
+  // Column-level filters
+  if(colFilters.status) prospects = prospects.filter(p => (p.status||'new') === colFilters.status);
+  if(colFilters.channel) prospects = prospects.filter(p => (p.channel||'FB DM') === colFilters.channel);
+  if(colFilters.city) prospects = prospects.filter(p => (p.city||'') === colFilters.city);
+  if(colFilters.niche) prospects = prospects.filter(p => (p.niche||'') === colFilters.niche);
+  if(colFilters.pipeline_stage) prospects = prospects.filter(p => (p.pipeline_stage||'new') === colFilters.pipeline_stage);
 
   // Status filter chips
   const statuses = Object.keys(stats.by_status);
@@ -619,7 +626,25 @@ function prospectsView(){
     </tr>`;
   }).join('');
 
-  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Local Rank</th><th>Score</th><th>Website</th><th>Social</th><th>Status</th><th>Channel</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
+  // Get unique values for column filters
+  const uniqueStatuses = [...new Set(allProspects.map(p => p.status||'new'))].sort();
+  const uniqueChannels = [...new Set(allProspects.map(p => p.channel||'FB DM'))].sort();
+  const uniqueCities = [...new Set(allProspects.map(p => p.city).filter(Boolean))].sort();
+  const uniqueNiches = [...new Set(allProspects.map(p => p.niche).filter(Boolean))].sort();
+  const uniquePipelines = [...new Set(allProspects.map(p => p.pipeline_stage||'new'))].sort();
+
+  const colFilter = (label, key, values, current) => {
+    const active = colFilters[key] ? ' filtered' : '';
+    return `<th class="col-filter${active}">
+      <div class="col-filter-label" data-col-filter="${key}">${label}${colFilters[key] ? ' ✓' : ''}</div>
+      <select class="col-filter-select" data-col-select="${key}">
+        <option value="">All</option>
+        ${values.map(v => `<option value="${esc(v)}" ${current===v?'selected':''}>${esc(v.replace(/_/g,' '))}</option>`).join('')}
+      </select>
+    </th>`;
+  };
+
+  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th>${colFilter('City','city',uniqueCities,colFilters.city||'')}${colFilter('Niche','niche',uniqueNiches,colFilters.niche||'')}<th style="text-align:center">Local Rank</th><th style="text-align:center">Score</th><th>Website</th><th>Social</th>${colFilter('Status','status',uniqueStatuses,colFilters.status||'')}${colFilter('Channel','channel',uniqueChannels,colFilters.channel||'')}${colFilter('Pipeline','pipeline_stage',uniquePipelines,colFilters.pipeline_stage||'')}<th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
 }
 
 function showReachOutModal(prospectId){
@@ -718,6 +743,18 @@ function bindProspectsView(){
   document.querySelectorAll('[data-prospect-filter]').forEach(btn => {
     btn.onclick = () => {
       state.prospectFilter = btn.dataset.prospectFilter;
+      render();
+    };
+  });
+
+  // Column filter dropdowns
+  document.querySelectorAll('[data-col-select]').forEach(sel => {
+    sel.onchange = () => {
+      const key = sel.dataset.colSelect;
+      const val = sel.value;
+      if(!state.colFilters) state.colFilters = {};
+      if(val) state.colFilters[key] = val;
+      else delete state.colFilters[key];
       render();
     };
   });
