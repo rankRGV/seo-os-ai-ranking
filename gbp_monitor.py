@@ -433,5 +433,5 @@ def get_gbp_trend(conn, client_id, days=28):
 
 
 if __name__ == "__main__":
-    demo_mode = "--live" not in sys.argv
-    run_gbp_monitor(demo=not demo_mode)
+    live_mode = "--live" in sys.argv
+    run_gbp_monitor(demo=not live_mode)

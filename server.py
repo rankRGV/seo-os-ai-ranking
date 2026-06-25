@@ -193,6 +193,37 @@ def uid(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:10]}"
 
 
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create all required tables/indexes if missing. Safe to call repeatedly."""
+    conn.executescript(SCHEMA)
+    # Plugin tables not in upstream SCHEMA
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS gbp_health (
+            id TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            views_search INTEGER DEFAULT 0,
+            views_maps INTEGER DEFAULT 0,
+            searches_direct INTEGER DEFAULT 0,
+            searches_discovery INTEGER DEFAULT 0,
+            actions_website INTEGER DEFAULT 0,
+            actions_directions INTEGER DEFAULT 0,
+            actions_call INTEGER DEFAULT 0,
+            actions_message INTEGER DEFAULT 0,
+            review_average REAL DEFAULT 0,
+            review_count INTEGER DEFAULT 0,
+            posts_published INTEGER DEFAULT 0,
+            photos_count INTEGER DEFAULT 0,
+            fetched_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ok',
+            FOREIGN KEY (client_id) REFERENCES clients(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gbp_client_date ON gbp_health(client_id, date);
+        CREATE INDEX IF NOT EXISTS idx_gbp_status ON gbp_health(status);
+    """)
+    conn.commit()
+
+
 def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -211,7 +242,7 @@ def one(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> dict | None:
 def init_db(seed: bool = True) -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with connect() as conn:
-        conn.executescript(SCHEMA)
+        ensure_schema(conn)
         if seed and one(conn, "SELECT id FROM clients LIMIT 1") is None:
             seed_db(conn)
 
@@ -513,7 +544,10 @@ class Handler(SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if not length:
             return {}
-        return json.loads(self.rfile.read(length).decode())
+        try:
+            return json.loads(self.rfile.read(length).decode())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -1028,15 +1062,7 @@ def main() -> None:
     httpd.serve_forever()
 
 
-# Register prospecting module routes (plugin)
-try:
-    import prospects as _prospects
-    _prospects.register_routes(Handler)
-except (ImportError, AttributeError):
-    pass
 
-
-# Register prospecting module routes (plugin)
 try:
     import prospects as _prospects
     _prospects.register_routes(Handler)
