@@ -166,6 +166,15 @@ CREATE TABLE IF NOT EXISTS gsc_performance (
 CREATE INDEX IF NOT EXISTS idx_gsc_client ON gsc_performance(client_id);
 CREATE INDEX IF NOT EXISTS idx_gsc_date ON gsc_performance(client_id, date);
 CREATE INDEX IF NOT EXISTS idx_gsc_created ON gsc_performance(created_at);
+CREATE TABLE IF NOT EXISTS health_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id TEXT NOT NULL,
+  score INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  components_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_health_snap_client ON health_snapshots(client_id, created_at);
 CREATE TABLE IF NOT EXISTS client_health (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL UNIQUE,
@@ -242,6 +251,15 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_gbp_client_date ON gbp_health(client_id, date);
         CREATE INDEX IF NOT EXISTS idx_gbp_status ON gbp_health(status);
+        CREATE TABLE IF NOT EXISTS health_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT NOT NULL,
+            score INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            components_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_health_snap_client ON health_snapshots(client_id, created_at);
     """)
     conn.commit()
 
@@ -456,6 +474,31 @@ def summary(conn: sqlite3.Connection, client_id: str = "all", days: int = 0) -> 
         data["gbp_health"] = gbp_data
     except (ImportError, Exception):
         data["gbp_health"] = []
+
+    # Opportunity Command Queue
+    try:
+        data["opportunity_queue"] = build_opportunity_queue(conn, client_id)
+    except Exception:
+        data["opportunity_queue"] = []
+
+    # Opportunity scores for each client
+    try:
+        opp_scores = []
+        for c in clients:
+            try:
+                opp = calculate_opportunity_score(conn, c["id"])
+                opp_scores.append({
+                    "client_id": c["id"],
+                    "name": c["name"],
+                    "score": opp["score"],
+                    "status": opp["status"],
+                    "next_best_action": opp["next_best_action"],
+                })
+            except Exception:
+                pass
+        data["opportunity_scores"] = sorted(opp_scores, key=lambda x: x["score"], reverse=True)
+    except Exception:
+        data["opportunity_scores"] = []
 
     return data
 
@@ -911,6 +954,43 @@ class Handler(SimpleHTTPRequestHandler):
         self.json_response({"ok": False, "error": "Not found"}, HTTPStatus.NOT_FOUND)
 
 
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/summary":
+            client = parse_qs(parsed.query).get("client", ["all"])[0]
+            days_str = parse_qs(parsed.query).get("days", ["0"])[0]
+            try:
+                days = int(days_str)
+            except (ValueError, TypeError):
+                days = 0
+            with connect() as conn:
+                s = summary(conn, client, days)
+            self.json_response({"ok": True, "summary": s, **s})
+            return
+        if parsed.path == "/api/prospects/card":
+            qs = parse_qs(parsed.query)
+            prospect_id = qs.get("id", [""])[0]
+            if prospect_id:
+                with connect() as conn:
+                    card = generate_outreach_card(conn, prospect_id)
+                if card:
+                    self.json_response({"ok": True, **card})
+                else:
+                    self.json_response({"ok": False, "error": "Prospect not found"}, 404)
+            else:
+                self.json_response({"ok": False, "error": "id required"}, 400)
+            return
+        if parsed.path == "/api/clients/health_trend":
+            qs = parse_qs(parsed.query)
+            client_id = qs.get("id", [""])[0]
+            days = int(qs.get("days", ["90"])[0])
+            with connect() as conn:
+                trend = get_health_trend(conn, client_id, days)
+            self.json_response({"ok": True, "trend": trend})
+            return
+        super().do_GET()
+
+
 def calculate_client_health(conn: sqlite3.Connection, client_id: str) -> dict:
     """Calculate a 0-100 health score for a client based on multiple signals.
 
@@ -1010,6 +1090,407 @@ def calculate_client_health(conn: sqlite3.Connection, client_id: str) -> dict:
     }
 
 
+def calculate_opportunity_score(conn: sqlite3.Connection, client_id: str) -> dict:
+    """Calculate a 0-100 opportunity score for a client/prospect.
+    
+    Higher score = more opportunity (more room to grow, more value).
+    Combines: search position, GBP metrics, traffic, content coverage, opportunity gaps.
+    Returns dict with score, status, components, and next_best_action.
+    """
+    import json
+
+    score_components = {
+        "search_position": 0,
+        "gbp_strength": 0,
+        "traffic": 0,
+        "content_coverage": 0,
+        "opportunity_gap": 0,
+        "gbp_activity": 0,
+    }
+
+    # 1. Search position (25%) — higher position = more opportunity
+    gsc_pos = conn.execute(
+        "SELECT AVG(position) as avg_pos FROM gsc_performance WHERE client_id=?",
+        (client_id,)
+    ).fetchone()
+    if gsc_pos and gsc_pos["avg_pos"]:
+        avg_pos = gsc_pos["avg_pos"]
+        if avg_pos <= 3:
+            score_components["search_position"] = 15
+        elif avg_pos <= 6:
+            score_components["search_position"] = 35
+        elif avg_pos <= 10:
+            score_components["search_position"] = 55
+        elif avg_pos <= 20:
+            score_components["search_position"] = 75
+        else:
+            score_components["search_position"] = 90
+    else:
+        score_components["search_position"] = 50
+
+    # 2. GBP strength (20%) — lower reviews/activity = more opportunity
+    gbp = conn.execute(
+        "SELECT review_average, review_count, views_search, views_maps, actions_call, actions_website, actions_directions, posts_published FROM gbp_health WHERE client_id=? ORDER BY date DESC LIMIT 1",
+        (client_id,)
+    ).fetchone()
+    if gbp:
+        rev_count = gbp["review_count"] or 0
+        reviews_avg = gbp["review_average"] or 0
+        rev_opportunity = max(0, 100 - rev_count * 2)
+        rating_gap = max(0, int((5.0 - (reviews_avg or 0)) * 20))
+        score_components["gbp_strength"] = min(100, (rev_opportunity + rating_gap) // 2)
+        total_actions = (gbp["actions_call"] or 0) + (gbp["actions_website"] or 0) + (gbp["actions_directions"] or 0)
+        if total_actions < 5:
+            score_components["gbp_activity"] = 80
+        elif total_actions < 20:
+            score_components["gbp_activity"] = 50
+        elif total_actions < 50:
+            score_components["gbp_activity"] = 30
+        else:
+            score_components["gbp_activity"] = 10
+    else:
+        score_components["gbp_strength"] = 50
+        score_components["gbp_activity"] = 50
+
+    # 3. Traffic (20%) — less traffic = more opportunity for growth
+    snap = conn.execute(
+        "SELECT clicks, impressions FROM metrics_snapshots WHERE client_id=? ORDER BY created_at DESC LIMIT 1",
+        (client_id,)
+    ).fetchone()
+    if snap:
+        impressions = snap["impressions"] or 0
+        if impressions < 50:
+            score_components["traffic"] = 80
+        elif impressions < 200:
+            score_components["traffic"] = 60
+        elif impressions < 1000:
+            score_components["traffic"] = 40
+        else:
+            score_components["traffic"] = 20
+    else:
+        score_components["traffic"] = 50
+
+    # 4. Content coverage (15%) — fewer pages = more opportunity
+    pages_row = conn.execute(
+        "SELECT COUNT(DISTINCT page) as n FROM gsc_performance WHERE client_id=?",
+        (client_id,)
+    ).fetchone()
+    pages = pages_row["n"] if pages_row else 0
+    if pages < 10:
+        score_components["content_coverage"] = 80
+    elif pages < 30:
+        score_components["content_coverage"] = 55
+    elif pages < 60:
+        score_components["content_coverage"] = 35
+    else:
+        score_components["content_coverage"] = 15
+
+    # 5. Opportunity gap (10%) — more high-priority opps = more to do
+    total_opps = conn.execute(
+        "SELECT COUNT(*) as n FROM opportunities WHERE client_id=?", (client_id,)
+    ).fetchone()["n"]
+    high_opps = conn.execute(
+        "SELECT COUNT(*) as n FROM opportunities WHERE client_id=? AND priority='high'",
+        (client_id,)
+    ).fetchone()["n"]
+    if total_opps > 0 and high_opps / total_opps > 0.25:
+        score_components["opportunity_gap"] = 80
+    elif high_opps > 0:
+        score_components["opportunity_gap"] = 50
+    else:
+        score_components["opportunity_gap"] = 20
+
+    # Weighted composite (higher = more opportunity)
+    score = int(
+        score_components["search_position"] * 0.25 +
+        score_components["gbp_strength"] * 0.20 +
+        score_components["traffic"] * 0.20 +
+        score_components["content_coverage"] * 0.15 +
+        score_components["opportunity_gap"] * 0.10 +
+        score_components["gbp_activity"] * 0.10
+    )
+    score = max(0, min(100, score))
+
+    # Determine next best action
+    next_action = _determine_next_best_action(score_components, gbp, snap, pages, total_opps, high_opps)
+
+    if score >= 65:
+        status = "high_opportunity"
+    elif score >= 35:
+        status = "medium_opportunity"
+    else:
+        status = "low_opportunity"
+
+    return {
+        "client_id": client_id,
+        "score": score,
+        "status": status,
+        "components": score_components,
+        "next_best_action": next_action,
+    }
+
+
+def _determine_next_best_action(components, gbp, snap, pages, total_opps, high_opps):
+    """Generate one clear next action based on weakest signals."""
+    weakest = min(components, key=components.get)
+
+    if weakest == "search_position":
+        return "Improve SERP visibility — optimize title/meta for top queries"
+    elif weakest == "gbp_strength":
+        if gbp and (gbp["review_count"] or 0) < 10:
+            return "Request reviews (currently {})".format(gbp["review_count"] or 0)
+        return "Complete GBP profile — add services, hours, Q&A"
+    elif weakest == "gbp_activity":
+        return "Post weekly GBP update + add photos"
+    elif weakest == "traffic":
+        return "Create content for high-impression low-CTR queries"
+    elif weakest == "content_coverage":
+        return f"Build {max(5, 30 - pages)} new service/location pages"
+    elif weakest == "opportunity_gap":
+        return f"Address {high_opps} high-priority opportunity(ies)"
+    else:
+        return "Run full audit — identify quick wins"
+
+
+def build_opportunity_queue(conn: sqlite3.Connection, client_id: str = "all") -> list:
+    """Build a unified opportunity queue combining:
+    - Existing opportunities (with evidence)
+    - GBP gaps (low reviews, no posts, missing services)
+    - Top GSC opportunities (high impressions, low CTR, position 4-10)
+    
+    Returns list of queue items sorted by impact (high first).
+    """
+    import json
+    queue = []
+    clients_filter = "" if client_id == "all" else "AND client_id=?"
+    params = () if client_id == "all" else (client_id,)
+
+    # ─── 1. Existing opportunities ──────────────────────────────────────────
+    opp_rows = conn.execute(
+        f"""SELECT o.*, c.name as client_name FROM opportunities o
+            JOIN clients c ON o.client_id = c.id
+            WHERE 1=1 {clients_filter}
+            ORDER BY CASE o.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                     o.impressions DESC LIMIT 50""",
+        params
+    ).fetchall()
+    for o in opp_rows:
+        o = dict(o)
+        evidence = json.loads(o.get("evidence_json") or "{}")
+        impact_map = {"high": "High", "medium": "Medium", "low": "Low"}
+        queue.append({
+            "id": f"opp_{o['id']}",
+            "business": o.get("client_name", o["client_id"]),
+            "client_id": o["client_id"],
+            "type": "Opportunity",
+            "type_label": o.get("opportunity_type", "SEO"),
+            "opportunity": o.get("problem", ""),
+            "evidence": f"Position {o.get('position', 0):.0f}, {o.get('impressions', 0):,} impressions, {o.get('ctr', 0):.2%} CTR",
+            "impact": impact_map.get(o.get("priority", "low"), "Low"),
+            "effort": o.get("effort", "Medium").title(),
+            "next_action": o.get("recommended_workflow", "Review"),
+            "status": o.get("status", "new"),
+            "source": evidence.get("source", "gsc_pull"),
+        })
+
+    # ─── 2. GBP gaps ────────────────────────────────────────────────────────
+    gbp_rows = conn.execute(
+        f"""SELECT g.client_id, c.name as client_name, g.review_count, g.review_average,
+                   g.posts_published, g.actions_call, g.actions_website, g.actions_directions,
+                   g.views_search, g.views_maps
+            FROM gbp_health g
+            JOIN clients c ON g.client_id = c.id
+            WHERE g.client_id IN (SELECT id FROM clients {'WHERE client_id=?' if client_id != 'all' else ''})
+            AND g.date = (SELECT MAX(g2.date) FROM gbp_health g2 WHERE g2.client_id = g.client_id)
+            ORDER BY g.date DESC""",
+        params if client_id != "all" else ()
+    ).fetchall()
+    for g in gbp_rows:
+        g = dict(g)
+        total_actions = (g.get("actions_call") or 0) + (g.get("actions_website") or 0) + (g.get("actions_directions") or 0)
+        rev_count = g.get("review_count") or 0
+        posts = g.get("posts_published") or 0
+
+        if rev_count < 10:
+            queue.append({
+                "id": f"gbp_reviews_{g['client_id']}",
+                "business": g.get("client_name", g["client_id"]),
+                "client_id": g["client_id"],
+                "type": "GBP",
+                "type_label": "Reviews",
+                "opportunity": f"Low reviews vs competitors ({rev_count} reviews)",
+                "evidence": f"Current: {rev_count} reviews, {g.get('review_average', 0):.1f}⭐. Top competitors average 50-150+",
+                "impact": "High" if rev_count < 5 else "Medium",
+                "effort": "Low",
+                "next_action": "Pitch review growth campaign",
+                "status": "new",
+                "source": "gbp_monitor",
+            })
+
+        if posts < 2:
+            queue.append({
+                "id": f"gbp_posts_{g['client_id']}",
+                "business": g.get("client_name", g["client_id"]),
+                "client_id": g["client_id"],
+                "type": "GBP",
+                "type_label": "Engagement",
+                "opportunity": "Stale GBP — no recent posts",
+                "evidence": f"Only {posts} posts published. Active businesses post 2-4x/month",
+                "impact": "Medium",
+                "effort": "Low",
+                "next_action": "Create 4-week content calendar",
+                "status": "new",
+                "source": "gbp_monitor",
+            })
+
+        if total_actions < 5:
+            queue.append({
+                "id": f"gbp_actions_{g['client_id']}",
+                "business": g.get("client_name", g["client_id"]),
+                "client_id": g["client_id"],
+                "type": "GBP",
+                "type_label": "Visibility",
+                "opportunity": "Low GBP engagement (calls, website clicks, directions)",
+                "evidence": f"Total actions: {total_actions} (calls: {g.get('actions_call', 0)}, web: {g.get('actions_website', 0)}, directions: {g.get('actions_directions', 0)})",
+                "impact": "Medium",
+                "effort": "Medium",
+                "next_action": "Optimize GBP categories + add Q&A",
+                "status": "new",
+                "source": "gbp_monitor",
+            })
+
+    # ─── 3. Top GSC opportunities (position 4-10, high impressions, low CTR) ─
+    gsc_top = conn.execute(
+        f"""SELECT client_id, query, page, SUM(impressions) as total_impr,
+                   AVG(position) as avg_pos, AVG(ctr) as avg_ctr, SUM(clicks) as total_clicks
+            FROM gsc_performance
+            WHERE 1=1 {clients_filter}
+            GROUP BY client_id, query
+            HAVING avg_pos BETWEEN 4 AND 15 AND total_impr > 100 AND avg_ctr < 0.03
+            ORDER BY total_impr DESC LIMIT 20""",
+        params
+    ).fetchall()
+    for g in gsc_top:
+        g = dict(g)
+        queue.append({
+            "id": f"gsc_{g['client_id']}_{g['query'][:20]}",
+            "business": g["client_id"],
+            "client_id": g["client_id"],
+            "type": "GSC",
+            "type_label": "SERP Gap",
+            "opportunity": f"'{g['query'][:40]}' — position {g['avg_pos']:.1f}, {g['total_impr']:,} impressions",
+            "evidence": f"Position {g['avg_pos']:.1f}, {g['total_impr']:,} impr, {g['avg_ctr']:.2%} CTR, {g['total_clicks']} clicks",
+            "impact": "High" if g['avg_pos'] <= 10 else "Medium",
+            "effort": "Medium",
+            "next_action": f"Optimize title/meta for '{g['query'][:30]}'",
+            "status": "new",
+            "source": "gsc_pull",
+        })
+
+    # Sort: High impact first
+    impact_order = {"High": 0, "Medium": 1, "Low": 2}
+    queue.sort(key=lambda x: (impact_order.get(x["impact"], 2), x["source"]))
+
+    return queue[:50]
+
+
+def generate_outreach_card(conn: sqlite3.Connection, prospect_id: str) -> dict | None:
+    """Generate an outreach-ready pitch card for a prospect.
+    
+    Combines prospect data + client data (if linked) into a concise pitch.
+    Returns dict with pitch, evidence, and recommended channel.
+    """
+    try:
+        from prospects import get_prospect
+        prospect = get_prospect(prospect_id)
+    except ImportError:
+        prospect = None
+    if not prospect:
+        return None
+
+    name = prospect.get("name", "Business")
+    keyword = prospect.get("keyword", "your main service")
+    city = prospect.get("city", "your city")
+    rank = prospect.get("rank", 0)
+    niche = prospect.get("niche", "your industry")
+    website = prospect.get("website", "")
+    score = prospect.get("score", 0)
+
+    # Build evidence snippets
+    evidence_parts = []
+    if rank and rank > 3:
+        evidence_parts.append(f"ranks #{rank} for '{keyword}' in {city}")
+    elif rank:
+        evidence_parts.append(f"ranks #{rank} for '{keyword}' in {city} (close to top 3)")
+
+    # If prospect has a linked client_id, pull client data
+    client_data = prospect.get("client_id", "")
+    if client_data:
+        client = one(conn, "SELECT * FROM clients WHERE id=?", (client_data,))
+        if client:
+            gbp = conn.execute(
+                "SELECT review_count, review_average FROM gbp_health WHERE client_id=? ORDER BY date DESC LIMIT 1",
+                (client_data,)
+            ).fetchone()
+            if gbp and (gbp["review_count"] or 0) < 10:
+                evidence_parts.append(f"GBP has only {gbp['review_count'] or 0} reviews (competitors have 50+)")
+            gsc = conn.execute(
+                "SELECT COUNT(DISTINCT page) as n FROM gsc_performance WHERE client_id=?",
+                (client_data,)
+            ).fetchone()
+            if gsc and gsc["n"] < 15:
+                evidence_parts.append(f"site has only {gsc['n']} ranking pages (competitors have 30+)")
+
+    if score and score >= 70:
+        evidence_parts.append(f"opportunity score: {score}/100 (high potential)")
+    elif score and score >= 40:
+        evidence_parts.append(f"opportunity score: {score}/100 (solid potential)")
+
+    # Determine recommended channel
+    channel = prospect.get("channel", "fb_dm")
+    channel_map = {
+        "fb_dm": "Facebook DM",
+        "email": "Email",
+        "phone": "Phone call",
+        "linkedin": "LinkedIn",
+        "in_person": "In person",
+    }
+    recommended_channel = channel_map.get(channel, "Facebook DM")
+
+    # Generate pitch paragraph
+    pitch_parts = [f"Hey {name.split()[0] if name else 'there'}!"]
+    if rank and rank <= 3:
+        pitch_parts.append(f"Congrats on ranking #{rank} for '{keyword}' in {city} — you're close to the top!")
+    elif rank:
+        pitch_parts.append(f"I noticed {name} ranks #{rank} for '{keyword}' in {city} on Google.")
+    else:
+        pitch_parts.append(f"I came across {name} while researching {keyword} in {city}.")
+
+    if evidence_parts:
+        pitch_parts.append("Here's what I see: " + "; ".join(evidence_parts) + ".")
+
+    pitch_parts.append(
+        f"I help {niche} businesses in the RGV get found on Google and generate more calls. "
+        "Would it be worth a quick 10-min chat to show you how you could get to the top 3? No pressure either way."
+    )
+    pitch_parts.append("")
+    pitch_parts.append("— Eddie / RankRGV | rankrgv.com | (956) 391-5991 / Helping RGV {} get found on Google".format(niche))
+
+    pitch = "\n".join(pitch_parts)
+
+    return {
+        "prospect_id": prospect_id,
+        "name": name,
+        "channel": recommended_channel,
+        "pitch": pitch,
+        "evidence": evidence_parts,
+        "score": score,
+        "rank": rank,
+        "keyword": keyword,
+        "city": city,
+    }
+
+
 def store_health_score(conn: sqlite3.Connection, health: dict) -> None:
     """Store or update client health score."""
     import uuid
@@ -1101,6 +1582,44 @@ try:
     _prospects.register_routes(Handler)
 except (ImportError, AttributeError):
     pass
+
+
+if __name__ == "__main__":
+    try:
+        import prospects
+        prospects.init_prospects()
+    except ImportError:
+        pass
+
+
+def get_health_trend(conn: sqlite3.Connection, client_id: str, days: int = 90) -> list:
+    """Get health score trend for a client over time."""
+    rows = conn.execute(
+        """SELECT score, status, components_json, created_at FROM health_snapshots
+           WHERE client_id=? AND created_at >= ?
+           ORDER BY created_at ASC""",
+        (client_id, (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).isoformat())
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def snapshot_all_health_scores(conn: sqlite3.Connection) -> int:
+    """Snapshot current health scores for all active clients. Returns count."""
+    import json as _json
+    clients = conn.execute(
+        "SELECT id FROM clients WHERE status IN ('active', 'setup')"
+    ).fetchall()
+    t = now()
+    count = 0
+    for c in clients:
+        health = calculate_client_health(conn, c["id"])
+        conn.execute(
+            "INSERT INTO health_snapshots (client_id, score, status, components_json, created_at) VALUES (?,?,?,?,?)",
+            (c["id"], health["score"], health["status"], _json.dumps(health.get("components", {})), t)
+        )
+        count += 1
+    conn.commit()
+    return count
 
 
 if __name__ == "__main__":

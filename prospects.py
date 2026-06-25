@@ -336,7 +336,7 @@ def register_routes(handler_class):
         return original_do_GET(self)
 
     def patched_do_POST(self):
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, parse_qs
         parsed = urlparse(self.path)
 
         if parsed.path == "/api/prospects/create":
