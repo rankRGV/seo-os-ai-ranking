@@ -307,22 +307,19 @@ def seed_db(conn: sqlite3.Connection) -> None:
 
 def generate_content_briefs(conn: sqlite3.Connection, client_id: str, days: int = 28) -> list:
     """Generate prioritized content briefs from GSC data for a client."""
-    from datetime import datetime, timezone, timedelta
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
-
     rows_data = conn.execute("""
         SELECT query,
                SUM(clicks) as total_clicks,
                SUM(impressions) as total_impressions,
-               AVG(ctr) as avg_ctr,
+               CASE WHEN SUM(impressions) > 0 THEN ROUND(CAST(SUM(clicks) AS REAL) / SUM(impressions), 4) ELSE 0 END as real_ctr,
                AVG(position) as avg_position,
                COUNT(DISTINCT page) as pages
         FROM gsc_performance
-        WHERE client_id=? AND created_at >= ?
+        WHERE client_id=?
         GROUP BY query
         HAVING total_impressions >= 5
         ORDER BY total_impressions DESC
-    """, (client_id, cutoff)).fetchall()
+    """, (client_id,)).fetchall()
 
     if not rows_data:
         return []
@@ -334,7 +331,7 @@ def generate_content_briefs(conn: sqlite3.Connection, client_id: str, days: int 
         query = row["query"]
         clicks = row["total_clicks"]
         impressions = row["total_impressions"]
-        avg_ctr = row["avg_ctr"] or 0
+        avg_ctr = row["real_ctr"] or 0
         avg_pos = row["avg_position"] or 0
 
         # Skip if already has an opportunity
@@ -372,6 +369,13 @@ def generate_content_briefs(conn: sqlite3.Connection, client_id: str, days: int 
             continue
         seen_queries.add(query)
 
+        # Get the top page for this query
+        top_page_row = conn.execute(
+            "SELECT page FROM gsc_performance WHERE client_id=? AND query=? ORDER BY impressions DESC LIMIT 1",
+            (client_id, query)
+        ).fetchone()
+        top_page = top_page_row["page"] if top_page_row else ""
+
         briefs.append({
             "client_id": client_id,
             "query": query,
@@ -383,6 +387,7 @@ def generate_content_briefs(conn: sqlite3.Connection, client_id: str, days: int 
             "avg_position": round(avg_pos, 1),
             "suggested_title": title_hint,
             "brief": suggestion,
+            "page": top_page,
         })
 
     priority_order = {"high": 0, "medium": 1, "low": 2}
