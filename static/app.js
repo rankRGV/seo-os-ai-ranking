@@ -2,7 +2,7 @@ const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
   ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Activity Log','pulse'], ['Settings','settings']
 ];
-let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', perfRange:28, reportClient:null, data:null, prospectFilter:'all', prospectSearch:'', sidebarCollapsed:false };
+let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', briefSearch:'', schedView:'calendar', schedRange:'7', perfRange:28, reportClient:null, data:null, prospectFilter:'all', prospectSearch:'', sidebarCollapsed:false };
 
 const $ = sel => document.querySelector(sel);
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -269,13 +269,26 @@ function contentBriefsView(){
   if(state.briefFilter === 'High') filtered = filtered.filter(b => b.priority === 'high');
   else if(state.briefFilter === 'Medium') filtered = filtered.filter(b => b.priority === 'medium');
   else if(state.briefFilter === 'Low') filtered = filtered.filter(b => b.priority === 'low');
+  // Text search across query, client, city, niche
+  const q = (state.briefSearch || '').toLowerCase();
+  if(q) {
+    filtered = filtered.filter(b =>
+      (b.query||'').toLowerCase().includes(q) ||
+      (b.client_id||'').toLowerCase().includes(q) ||
+      (b.niche||'').toLowerCase().includes(q) ||
+      (b.brief||'').toLowerCase().includes(q)
+    );
+  }
   const chips = `<div class="opp-chips">${filters.map(f=>`<button class="opp-chip ${state.briefFilter===f?'active':''}" data-brief-filter="${f}">${f}</button>`).join('')}</div>`;
   const rows = filtered.map((b,i) => {
-    const icon = b.priority === 'high' ? '🔴' : b.priority === 'medium' ? '🟡' : '⚪';
     return `<tr><td class="rank-cell">${i+1}</td><td><span class="client-cell"><span class="dot ${clientDot(b.client_id)}"></span>${esc(clientName(b.client_id))}</span></td><td class="muted" style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.query)}">${esc(b.query)}</td><td class="website-cell">${b.page ? `<a href="${esc(b.page)}" target="_blank" rel="noopener" class="website-link" title="${esc(b.page)}">${esc(safePath(b.page))}</a>` : '—'}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${b.avg_position ? Number(b.avg_position).toFixed(1) : '—'}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(b.impressions)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${pct(b.avg_ctr)}</td><td class="muted" style="font-size:12px;max-width:280px">${esc(b.brief)}</td><td class="mono" style="font-size:12px;color:#1D4ED8;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.suggested_title)}">${esc(b.suggested_title)}</td></tr>`;
   });
-  setTimeout(()=>document.querySelectorAll('[data-brief-filter]').forEach(b=>b.onclick=()=>{state.briefFilter=b.dataset.briefFilter;render()}),0);
-  return page('Content Briefs','Auto-generated content opportunities from GSC search data — keywords with traction but weak signals.', section('Content Opportunities','Keywords ranking 4-20 with decent impressions but weak CTR — ready for content creation or optimization.','edit','purple',`${briefs.length} briefs`, simpleTable(['#','Client','Query','Page','Pos.','Impr.','CTR','Opportunity','Suggested Title'], rows), '<button class="btn" id="refreshBriefsBtn">Refresh Briefs</button>'));
+  setTimeout(()=>{
+    document.querySelectorAll('[data-brief-filter]').forEach(b=>b.onclick=()=>{state.briefFilter=b.dataset.briefFilter;render()});
+    const si = document.getElementById('briefSearch');
+    if(si) si.oninput = debounceFn((e) => { state.briefSearch = e.target.value; render(); }, 300);
+  },0);
+  return page('Content Briefs',`Showing ${filtered.length} of ${briefs.length} briefs.`, `<div class="prospect-toolbar"><input class="search-input" id="briefSearch" placeholder="Search keyword, niche, opportunity..." value="${esc(state.briefSearch||'')}" /></div>${chips}<div class="card section-card"><div class="table-wrap"><table><thead><tr><th>#</th><th>Client</th><th>Query</th><th>Page</th><th>Pos.</th><th>Impr.</th><th>CTR</th><th>Opportunity</th><th>Suggested Title</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="empty">No briefs match this filter.</td></tr>'}</tbody></table></div></div>`);
 }
 function gscView(){
   const d = state.data;
