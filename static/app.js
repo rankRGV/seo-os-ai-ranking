@@ -1,6 +1,6 @@
 const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
-  ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Outreach Cards','target'], ['Activity Log','pulse'], ['Settings','settings']
+  ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Activity Log','pulse'], ['Settings','settings']
 ];
 let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null, prospectFilter:'all', prospectSearch:'' };
 
@@ -471,7 +471,7 @@ function outreachCardsView(){
 }
 
 function renderView(){
-  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'Command Queue':commandQueueView,'GSC Keywords':gscView,'Content Briefs':contentBriefsView,'Prospects':prospectsView,'Outreach Cards':outreachCardsView,'Activity Log':activityView,'Settings':settingsView};
+  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'Command Queue':commandQueueView,'GSC Keywords':gscView,'Content Briefs':contentBriefsView,'Prospects':prospectsView,'Activity Log':activityView,'Settings':settingsView};
   $('#view').innerHTML = (map[state.section] || commandCenter)();
   if(state.section === 'Prospects' && window.bindProspectsView) window.bindProspectsView();
 }
@@ -568,18 +568,116 @@ function prospectsView(){
   const pipelineBar = `<div class="pipeline-bar">${stages.map(s => `<div class="pipeline-stage ${stats.by_pipeline[s] ? 'active' : ''}"><div class="pipeline-count">${stats.by_pipeline[s] || 0}</div><div class="pipeline-label">${stageLabels[s]}</div></div>`).join('')}</div>`;
 
   const statusOptions = ['new','contacted','pitched','negotiation','closed_won','closed_lost','not_interested','wrong_city','engaged','message_sent','replied','active'];
+  const channelOptions = ['FB DM','FB DM Sent','Call','Email','Email + FB','LinkedIn','In Person'];
+
   const rows = prospects.map(p => {
     const statusSel = `<select class="status-select" data-status-change="${p.id}" data-current="${p.status||'new'}">${statusOptions.map(s => `<option value="${s}" ${(p.status||'new')===s?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>`;
-    return `<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.keyword)}</td><td>${esc(p.city)}</td><td>${esc(p.niche)}</td><td class="rank-cell">${p.rank||'—'}</td><td class="score-cell">${p.score||'—'}</td><td style="font-size:11px">${esc((p.website||'').replace(/^https?:\/\//,''))}</td><td>${statusSel}</td><td><span class="tag ${p.pipeline_stage==='closed_won'?'green':p.pipeline_stage==='closed_lost'?'red':'blue'}">${(p.pipeline_stage||'new').replace(/_/g,' ')}</span></td><td class="prospect-actions"><button class="icon-btn" data-dm-opener="${p.id}" title="Copy FB DM opener">📋</button><button class="icon-btn" data-log-activity="${p.id}" title="Log activity">📝</button><button class="icon-btn" data-advance="${p.id}" title="Advance pipeline">→</button><button class="icon-btn" data-delete-prospect="${p.id}" title="Delete">✕</button></td></tr>`;
+    const channelSel = `<select class="channel-select" data-channel-change="${p.id}">${channelOptions.map(c => `<option value="${c}" ${(p.channel||'FB DM')===c?'selected':''}>${c}</option>`).join('')}</select>`;
+    return `<tr>
+      <td><strong>${esc(p.name)}</strong></td>
+      <td>${esc(p.keyword)}</td>
+      <td>${esc(p.city)}</td>
+      <td>${esc(p.niche)}</td>
+      <td class="rank-cell">${p.rank||'—'}</td>
+      <td class="score-cell">${p.score||'—'}</td>
+      <td style="font-size:11px">${esc((p.website||'').replace(/^https?:\/\//,''))}</td>
+      <td>${statusSel}</td>
+      <td>${channelSel}</td>
+      <td><span class="tag ${p.pipeline_stage==='closed_won'?'green':p.pipeline_stage==='closed_lost'?'red':'blue'}">${(p.pipeline_stage||'new').replace(/_/g,' ')}</span></td>
+      <td class="prospect-actions">
+        <button class="icon-btn reach-out-btn" data-reach-out="${p.id}" title="Generate outreach message">📨</button>
+        <button class="icon-btn" data-log-activity="${p.id}" title="Log activity">📝</button>
+        <button class="icon-btn" data-advance="${p.id}" title="Advance pipeline">→</button>
+        <button class="icon-btn" data-delete-prospect="${p.id}" title="Delete">✕</button>
+      </td>
+    </tr>`;
   }).join('');
 
-  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Rank</th><th>Score</th><th>Website</th><th>Status</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
+  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Local Rank</th><th>Score</th><th>Website</th><th>Status</th><th>Channel</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="11" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
+}
+
+function showReachOutModal(prospectId){
+  const p = (window._prospectData || []).find(x => x.id === prospectId);
+  if(!p) return;
+
+  const rank = p.rank || '—';
+  const keyword = p.keyword || 'your service';
+  const city = p.city || 'your area';
+  const name = p.name;
+  const channel = p.channel || 'FB DM';
+
+  // Generate messages based on channel
+  const fbDM = `Hey! I was searching for "${keyword}" in ${city} and came across ${name}. You're currently ranking #${rank} on Google — I can help you get to top 3. Mind if I send over a quick free audit? No pitch, just the data.`;
+  const email = `Subject: ${name} — Google ranking opportunity\n\nHi there,\n\nI was searching for "${keyword}" in ${city} and came across ${name}. You're currently ranking #${rank} on Google's map pack.\n\nI help local businesses get more calls from Google. I put together a quick free audit showing exactly what it would take to get you into the top 3.\n\nWorth a look?\n\n— Eddie`;
+  const call = `Hi, this is Eddie with RankRGV. I was searching for "${keyword}" in ${city}" and noticed ${name} is ranking #${rank} on Google. I help local businesses get more calls from Google map pack. I've got a quick free audit that shows exactly what to do to get to top 3. Got 2 minutes?`;
+  const linkedin = `Hi ${name}! I came across your business while researching "${keyword}" in ${city}. You're ranking #${rank} on Google — I help local businesses get more calls from Google. Would you be open to a quick free audit?`;
+
+  const messages = { 'FB DM': fbDM, 'Email': email, 'Call': call, 'LinkedIn': linkedin };
+  const currentMsg = messages[channel] || fbDM;
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="prospect-modal reach-out-modal">
+    <div class="modal-head"><h3>📨 Reach Out — ${esc(name)}</h3><button class="modal-close" data-close-modal>×</button></div>
+    <div class="modal-body">
+      <div class="reach-out-tabs">
+        <button class="reach-tab ${channel==='FB DM'?'active':''}" data-msg-type="FB DM">FB DM</button>
+        <button class="reach-tab ${channel==='Email'?'active':''}" data-msg-type="Email">Email</button>
+        <button class="reach-tab ${channel==='Call'?'active':''}" data-msg-type="Call">Call Script</button>
+        <button class="reach-tab ${channel==='LinkedIn'?'active':''}" data-msg-type="LinkedIn">LinkedIn</button>
+      </div>
+      <textarea class="reach-out-msg" id="reachOutMsg">${esc(currentMsg)}</textarea>
+      <div class="reach-out-actions">
+        <button class="btn primary" id="copyReachOut">📋 Copy Message</button>
+        <button class="btn" id="markSent">✓ Mark as Sent</button>
+      </div>
+      <div class="reach-out-status">
+        <label>Status after sending:</label>
+        <select id="postSendStatus">
+          <option value="contacted">Contacted</option>
+          <option value="message_sent">Message Sent</option>
+          <option value="engaged">Engaged</option>
+          <option value="pitched">Pitched</option>
+        </select>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+
+  modal.querySelector('[data-close-modal]').onclick = () => modal.remove();
+
+  // Tab switching
+  modal.querySelectorAll('.reach-tab').forEach(tab => {
+    tab.onclick = () => {
+      modal.querySelectorAll('.reach-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const type = tab.dataset.msgType;
+      const msgs = { 'FB DM': fbDM, 'Email': email, 'Call': call, 'LinkedIn': linkedin };
+      modal.querySelector('#reachOutMsg').value = msgs[type] || fbDM;
+    };
+  });
+
+  modal.querySelector('#copyReachOut').onclick = async () => {
+    const msg = modal.querySelector('#reachOutMsg').value;
+    await navigator.clipboard.writeText(msg);
+    toast('Message copied ✓');
+  };
+
+  modal.querySelector('#markSent').onclick = async () => {
+    const newStatus = modal.querySelector('#postSendStatus').value;
+    await api('/api/prospects/update', { method: 'POST', body: JSON.stringify({ id: prospectId, status: newStatus }) });
+    // Update local data
+    if(p) p.status = newStatus;
+    toast(`Status → ${newStatus.replace(/_/g,' ')} ✓`);
+    modal.remove();
+    render();
+  };
 }
 
 function showCreateModal(){
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="prospect-modal"><div class="modal-head"><h3>New Prospect</h3><button class="modal-close" data-close-modal>×</button></div><div class="modal-body"><label>Business Name *</label><input class="modal-input" id="newName" placeholder="e.g. Edel Roofing" /><label>Phone</label><input class="modal-input" id="newPhone" placeholder="(956) 555-1234" /><label>Email</label><input class="modal-input" id="newEmail" type="email" placeholder="owner@example.com" /><label>Website</label><input class="modal-input" id="newWebsite" placeholder="https://example.com" /><label>Keyword</label><input class="modal-input" id="newKeyword" placeholder="e.g. roofing contractor" /><label>City</label><input class="modal-input" id="newCity" placeholder="e.g. Edinburg" /><label>Niche</label><input class="modal-input" id="newNiche" placeholder="e.g. Roofing" /><label>Current Rank (1-10)</label><input class="modal-input" id="newRank" type="number" min="1" max="10" placeholder="4" /><label>Score (1-100)</label><input class="modal-input" id="newScore" type="number" min="1" max="100" placeholder="7" /><label>Channel</label><select class="modal-input" id="newChannel"><option value="fb_dm">FB DM</option><option value="email">Email</option><option value="phone">Phone</option><option value="linkedin">LinkedIn</option><option value="in_person">In Person</option></select><label>Notes</label><textarea class="modal-input" id="newNotes" rows="2" placeholder="Any relevant info..."></textarea><button class="btn primary" id="saveNewProspect">Create Prospect</button></div></div>`;
+  modal.innerHTML = `<div class="prospect-modal"><div class="modal-head"><h3>New Prospect</h3><button class="modal-close" data-close-modal>×</button></div><div class="modal-body"><label>Business Name *</label><input class="modal-input" id="newName" placeholder="e.g. Edel Roofing" /><label>Phone</label><input class="modal-input" id="newPhone" placeholder="(956) 555-1234" /><label>Email</label><input class="modal-input" id="newEmail" type="email" placeholder="owner@example.com" /><label>Website</label><input class="modal-input" id="newWebsite" placeholder="https://example.com" /><label>Keyword</label><input class="modal-input" id="newKeyword" placeholder="e.g. roofing contractor" /><label>City</label><input class="modal-input" id="newCity" placeholder="e.g. Edinburg" /><label>Niche</label><input class="modal-input" id="newNiche" placeholder="e.g. Roofing" /><label>Current Rank (1-10)</label><input class="modal-input" id="newRank" type="number" min="1" max="10" placeholder="4" /><label>Score (1-100)</label><input class="modal-input" id="newScore" type="number" min="1" max="100" placeholder="7" /><label>Channel</label><select class="modal-input" id="newChannel"><option value="FB DM">FB DM</option><option value="Email">Email</option><option value="Call">Call</option><option value="LinkedIn">LinkedIn</option></select><label>Notes</label><textarea class="modal-input" id="newNotes" rows="2" placeholder="Any relevant info..."></textarea><button class="btn primary" id="saveNewProspect">Create Prospect</button></div></div>`;
   document.body.appendChild(modal);
   modal.querySelector('[data-close-modal]').onclick = () => modal.remove();
   modal.querySelector('#saveNewProspect').onclick = async () => {
@@ -661,9 +759,11 @@ function bindProspectsView(){
   });
 
   document.querySelectorAll('[data-dm-opener]').forEach(btn => { btn.onclick = async () => { try { const r = await api('/api/prospects/dm_opener?id=' + btn.dataset.dmOpener); if(r.ok && r.opener) { await navigator.clipboard.writeText(r.opener); toast('DM opener copied ✓'); } } catch(e) { toast('Copy failed', true); } }; });
+  document.querySelectorAll('[data-reach-out]').forEach(btn => { btn.onclick = () => showReachOutModal(btn.dataset.reachOut); });
   document.querySelectorAll('[data-log-activity]').forEach(btn => { btn.onclick = () => showActivityModal(btn.dataset.logActivity); });
   document.querySelectorAll('[data-advance]').forEach(btn => { btn.onclick = async () => { const stages = ['new', 'contacted', 'pitched', 'negotiation', 'closed_won']; const r = await api('/api/prospects/detail?id=' + btn.dataset.advance); if(r.ok) { const current = r.pipeline_stage || 'new'; const idx = stages.indexOf(current); const next = stages[Math.min(idx + 1, stages.length - 1)]; await api('/api/prospects/update', { method: 'POST', body: JSON.stringify({ id: btn.dataset.advance, pipeline_stage: next }) }); toast(`Advanced to ${next} ✓`); load().then(() => render()); } }; });
   document.querySelectorAll('[data-delete-prospect]').forEach(btn => { btn.onclick = async () => { if(!confirm('Delete this prospect permanently?')) return; await api('/api/prospects/delete', { method: 'POST', body: JSON.stringify({ id: btn.dataset.deleteProspect }) }); toast('Prospect deleted'); load().then(() => render()); }; });
+  document.querySelectorAll('[data-channel-change]').forEach(sel => { sel.onchange = async () => { const newChannel = sel.value; try { await api('/api/prospects/update', { method: 'POST', body: JSON.stringify({ id: sel.dataset.channelChange, channel: newChannel }) }); const p = window._prospectData.find(x => x.id === sel.dataset.channelChange); if(p) p.channel = newChannel; toast(`Channel → ${newChannel} ✓`); } catch(e) { toast('Channel update failed', true); } }; });
 }
 
 function debounceFn(fn, ms){ let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); }; }
