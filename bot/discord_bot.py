@@ -9,7 +9,7 @@ from pathlib import Path
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-DB_PATH = Path("/root/seo-os-dashboard/data/seo-os.sqlite")
+DB_PATH = Path(os.environ.get("SEO_OS_DB_PATH", Path(__file__).resolve().parent.parent / "data" / "seo-os.sqlite"))
 
 BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 if not BOT_TOKEN:
@@ -23,7 +23,7 @@ if not BOT_TOKEN:
     except Exception:
         pass
 
-CHANNEL_ID = "1518799542554984522"
+CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "")
 
 # ── Database helpers ─────────────────────────────────────────────────────────
 

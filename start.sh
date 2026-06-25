@@ -19,7 +19,7 @@ pkill -f discord_bot.py 2>/dev/null
 sleep 2
 
 echo "Starting SEO OS Dashboard..."
-python3 server.py --host 0.0.0.0 --port 8787 &
+python3 server.py --host 127.0.0.1 --port 8787 &
 sleep 3
 
 echo "Starting Discord Bot..."

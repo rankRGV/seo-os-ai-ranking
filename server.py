@@ -149,6 +149,19 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS gsc_performance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id TEXT NOT NULL,
+  query TEXT NOT NULL DEFAULT '',
+  page TEXT NOT NULL DEFAULT '',
+  clicks INTEGER NOT NULL DEFAULT 0,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  ctr REAL NOT NULL DEFAULT 0,
+  position REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gsc_client ON gsc_performance(client_id);
+CREATE INDEX IF NOT EXISTS idx_gsc_created ON gsc_performance(created_at);
 CREATE TABLE IF NOT EXISTS client_health (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL UNIQUE,
@@ -211,15 +224,13 @@ def seed_db(conn: sqlite3.Connection) -> None:
         "model_policy": "Data pulls use no model. Summaries and labeling use a cheap configured model. Strategic plans use a stronger model only after approval.",
         "safe_actions": "Dashboard approvals update state and create bounded tasks. Production actions need separate explicit approval.",
         "onboarding_goal": "Add clients via the Add Client form. Connect GSC, GA4 for each client. SEO OS handles managed refresh jobs and approval loops.",
-        "discord_webhook_url": "https://discord.com/api/webhooks/1504130721009373315/yYB7q3GPViCkjCToom70OZG0L-6rPiYdv1uqJQbIDGVUP7oSN0XLewHjCpXqh53p4DpX",
-        "discord_channel_id": "1518799542554984522",
     }
     conn.executemany("INSERT INTO settings VALUES (?,?)", settings.items())
 
     # System event for fresh start
     conn.execute(
         "INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)",
-        ("ev_1", "all", "dashboard", "system", "complete", "Dashboard initialized — add clients via the onboarding form to begin.", "", t)
+        ("ev_1", "all", "dashboard", "system", "complete", "Dashboard initialized — add clients via the onboarding form to begin.", "", "", t)
     )
 
 

@@ -10,12 +10,14 @@ To integrate, add to server.py:
 """
 
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from http import HTTPStatus
 
-DB_PATH = "data/seo-os.sqlite"
+DB_PATH = os.environ.get("SEO_OS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "seo-os.sqlite"))
 
 # ─── Schema ──────────────────────────────────────────────────────────────────
 

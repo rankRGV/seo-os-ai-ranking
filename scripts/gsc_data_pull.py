@@ -2,14 +2,16 @@
 """Google Search Console data pull for SEO OS Dashboard."""
 
 import json
+import os
 import sys
 import uuid
 import sqlite3
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
-DB_PATH = "data/seo-os.sqlite"
+DB_PATH = os.environ.get("SEO_OS_DB_PATH", str(Path(__file__).resolve().parent.parent / "data" / "seo-os.sqlite"))
 GSC_API_BASE = "https://www.googleapis.com/webmasters/v3/sites"
 
 # Client ID → GSC site URL mapping (from clients table)

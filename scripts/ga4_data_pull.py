@@ -27,7 +27,7 @@ from server import calculate_client_health, store_health_score
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-DB_PATH = Path("/root/seo-os-dashboard/data/seo-os.sqlite")
+DB_PATH = Path(os.environ.get("SEO_OS_DB_PATH", Path(__file__).resolve().parent.parent / "data" / "seo-os.sqlite"))
 TOKEN_PATH = Path("/root/.hermes/google_token.json")
 ROOT = Path(__file__).resolve().parent.parent
 

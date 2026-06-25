@@ -9,12 +9,13 @@ https://www.googleapis.com/auth/business.manage scope.
 """
 
 import json
+import os
 import sqlite3
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-DB_PATH = "data/seo-os.sqlite"
+DB_PATH = os.environ.get("SEO_OS_DB_PATH", str(Path(__file__).resolve().parent / "data" / "seo-os.sqlite"))
 
 # ─── Schema ──────────────────────────────────────────────────────────────────
 
