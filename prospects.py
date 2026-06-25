@@ -233,6 +233,15 @@ def update_prospect(prospect_id, data):
         conn.commit()
 
     conn.close()
+
+    # Write status change back to Google Sheet (non-blocking)
+    if 'status' in data:
+        try:
+            from scripts.prospects_sync import push_single_status
+            push_single_status(existing['name'], data['status'])
+        except Exception:
+            pass  # Don't fail the update if Sheet write fails
+
     return True
 
 
