@@ -1,8 +1,8 @@
 const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
-  ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Outreach Cards','target'], ['Agent Tasks','list'], ['Content','edit'], ['Schedule','calendar'], ['CTR Tests','target'], ['Activity Log','pulse'], ['Reports','file'], ['Settings','settings']
+  ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Outreach Cards','target'], ['Activity Log','pulse'], ['Settings','settings']
 ];
-let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null };
+let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null, prospectFilter:'all', prospectSearch:'' };
 
 const $ = sel => document.querySelector(sel);
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -471,7 +471,7 @@ function outreachCardsView(){
 }
 
 function renderView(){
-  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'Command Queue':commandQueueView,'GSC Keywords':gscView,'Content Briefs':contentBriefsView,'Prospects':prospectsView,'Outreach Cards':outreachCardsView,'Agent Tasks':tasksView,'Content':contentView,'Schedule':scheduleView,'CTR Tests':ctrView,'Activity Log':activityView,'Reports':reportsView,'Settings':settingsView};
+  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'Command Queue':commandQueueView,'GSC Keywords':gscView,'Content Briefs':contentBriefsView,'Prospects':prospectsView,'Outreach Cards':outreachCardsView,'Activity Log':activityView,'Settings':settingsView};
   $('#view').innerHTML = (map[state.section] || commandCenter)();
   if(state.section === 'Prospects' && window.bindProspectsView) window.bindProspectsView();
 }
@@ -535,14 +535,45 @@ load().catch(e => { console.error(e); $('#view').innerHTML = `<div class="warnin
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function prospectsView(){
-  const prospects = (window._prospectData || []);
+  const allProspects = (window._prospectData || []);
   const stats = window._prospectStats || { by_status: {}, by_pipeline: {}, by_city: {} };
-  const statusChips = Object.keys(stats.by_status).map(s => `<span class="prospect-chip status-${s}">${s.replace(/_/g,' ')}: ${stats.by_status[s]}</span>`).join('');
+  const currentFilter = state.prospectFilter || 'all';
+  const searchQ = state.prospectSearch || '';
+
+  // Filter prospects
+  let prospects = allProspects;
+  if (currentFilter !== 'all') {
+    prospects = prospects.filter(p => (p.status || 'new') === currentFilter);
+  }
+  if (searchQ) {
+    const q = searchQ.toLowerCase();
+    prospects = prospects.filter(p =>
+      (p.name||'').toLowerCase().includes(q) ||
+      (p.keyword||'').toLowerCase().includes(q) ||
+      (p.city||'').toLowerCase().includes(q) ||
+      (p.niche||'').toLowerCase().includes(q)
+    );
+  }
+
+  // Status filter chips
+  const statuses = Object.keys(stats.by_status);
+  const allCount = allProspects.length;
+  const filterChips = `<div class="prospect-filters">
+    <button class="filter-chip ${currentFilter==='all'?'active':''}" data-prospect-filter="all">All (${allCount})</button>
+    ${statuses.map(s => `<button class="filter-chip ${currentFilter===s?'active':''}" data-prospect-filter="${s}">${s.replace(/_/g,' ')} (${stats.by_status[s]})</button>`).join('')}
+  </div>`;
+
   const stages = ['new', 'contacted', 'pitched', 'negotiation', 'closed_won', 'closed_lost'];
   const stageLabels = {new:'New',contacted:'Contacted',pitched:'Pitched',negotiation:'Negotiation',closed_won:'Closed-Won',closed_lost:'Closed-Lost'};
   const pipelineBar = `<div class="pipeline-bar">${stages.map(s => `<div class="pipeline-stage ${stats.by_pipeline[s] ? 'active' : ''}"><div class="pipeline-count">${stats.by_pipeline[s] || 0}</div><div class="pipeline-label">${stageLabels[s]}</div></div>`).join('')}</div>`;
-  const rows = prospects.map(p => `<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.keyword)}</td><td>${esc(p.city)}</td><td>${esc(p.niche)}</td><td class="rank-cell">${p.rank||'—'}</td><td class="score-cell">${p.score||'—'}</td><td style="font-size:11px">${esc((p.website||'').replace(/^https?:\/\//,''))}</td><td><span class="tag ${p.status==='closed_won'?'green':p.status==='closed_lost'?'red':p.status==='contacted'?'blue':'muted'}">${(p.status||'').replace(/_/g,' ')}</span></td><td><span class="tag ${p.pipeline_stage==='closed_won'?'green':p.pipeline_stage==='closed_lost'?'red':'blue'}">${(p.pipeline_stage||'').replace(/_/g,' ')}</span></td><td class="prospect-actions"><button class="icon-btn" data-dm-opener="${p.id}" title="Copy FB DM opener">📋</button><button class="icon-btn" data-log-activity="${p.id}" title="Log activity">📝</button><button class="icon-btn" data-advance="${p.id}" title="Advance pipeline">→</button><button class="icon-btn" data-delete-prospect="${p.id}" title="Delete">✕</button></td></tr>`).join('');
-  return page('Prospects', 'Your prospecting pipeline — better than a Google sheet.', `${pipelineBar}<div class="prospect-stats">${statusChips}</div><div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Rank</th><th>Score</th><th>Website</th><th>Status</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">No prospects yet. Click "Add Prospect" to get started.</td></tr>'}</tbody></table></div></div>`);
+
+  const statusOptions = ['new','contacted','pitched','negotiation','closed_won','closed_lost','not_interested','wrong_city','engaged','message_sent','replied','active'];
+  const rows = prospects.map(p => {
+    const statusSel = `<select class="status-select" data-status-change="${p.id}" data-current="${p.status||'new'}">${statusOptions.map(s => `<option value="${s}" ${(p.status||'new')===s?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}</select>`;
+    return `<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.keyword)}</td><td>${esc(p.city)}</td><td>${esc(p.niche)}</td><td class="rank-cell">${p.rank||'—'}</td><td class="score-cell">${p.score||'—'}</td><td style="font-size:11px">${esc((p.website||'').replace(/^https?:\/\//,''))}</td><td>${statusSel}</td><td><span class="tag ${p.pipeline_stage==='closed_won'?'green':p.pipeline_stage==='closed_lost'?'red':'blue'}">${(p.pipeline_stage||'new').replace(/_/g,' ')}</span></td><td class="prospect-actions"><button class="icon-btn" data-dm-opener="${p.id}" title="Copy FB DM opener">📋</button><button class="icon-btn" data-log-activity="${p.id}" title="Log activity">📝</button><button class="icon-btn" data-advance="${p.id}" title="Advance pipeline">→</button><button class="icon-btn" data-delete-prospect="${p.id}" title="Delete">✕</button></td></tr>`;
+  }).join('');
+
+  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Rank</th><th>Score</th><th>Website</th><th>Status</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
 }
 
 function showCreateModal(){
@@ -578,8 +609,57 @@ function showActivityModal(prospectId){
 function bindProspectsView(){
   const addBtn = document.getElementById('addProspectBtn');
   if(addBtn) addBtn.onclick = showCreateModal;
+
+  // Search (client-side filter)
   const searchInput = document.getElementById('prospectSearch');
-  if(searchInput) searchInput.oninput = debounceFn((e) => { load({ q: e.target.value }).then(() => render()); }, 300);
+  if(searchInput) searchInput.oninput = debounceFn((e) => {
+    state.prospectSearch = e.target.value;
+    render();
+  }, 300);
+
+  // Status filter chips
+  document.querySelectorAll('[data-prospect-filter]').forEach(btn => {
+    btn.onclick = () => {
+      state.prospectFilter = btn.dataset.prospectFilter;
+      render();
+    };
+  });
+
+  // Status dropdown change
+  document.querySelectorAll('[data-status-change]').forEach(sel => {
+    sel.onchange = async () => {
+      const newStatus = sel.value;
+      const oldStatus = sel.dataset.current;
+      if (newStatus === oldStatus) return;
+      sel.disabled = true;
+      try {
+        const r = await api('/api/prospects/update', {
+          method: 'POST',
+          body: JSON.stringify({ id: sel.dataset.statusChange, status: newStatus })
+        });
+        if (r.ok) {
+          // Update local data
+          const p = window._prospectData.find(x => x.id === sel.dataset.statusChange);
+          if (p) p.status = newStatus;
+          sel.dataset.current = newStatus;
+          // Update stats
+          window._prospectStats.by_status[oldStatus] = (window._prospectStats.by_status[oldStatus] || 1) - 1;
+          window._prospectStats.by_status[newStatus] = (window._prospectStats.by_status[newStatus] || 0) + 1;
+          toast(`Status → ${newStatus.replace(/_/g,' ')} ✓`);
+          render();
+        } else {
+          sel.value = oldStatus;
+          toast('Update failed', true);
+        }
+      } catch(e) {
+        sel.value = oldStatus;
+        toast('Update failed', true);
+      } finally {
+        sel.disabled = false;
+      }
+    };
+  });
+
   document.querySelectorAll('[data-dm-opener]').forEach(btn => { btn.onclick = async () => { try { const r = await api('/api/prospects/dm_opener?id=' + btn.dataset.dmOpener); if(r.ok && r.opener) { await navigator.clipboard.writeText(r.opener); toast('DM opener copied ✓'); } } catch(e) { toast('Copy failed', true); } }; });
   document.querySelectorAll('[data-log-activity]').forEach(btn => { btn.onclick = () => showActivityModal(btn.dataset.logActivity); });
   document.querySelectorAll('[data-advance]').forEach(btn => { btn.onclick = async () => { const stages = ['new', 'contacted', 'pitched', 'negotiation', 'closed_won']; const r = await api('/api/prospects/detail?id=' + btn.dataset.advance); if(r.ok) { const current = r.pipeline_stage || 'new'; const idx = stages.indexOf(current); const next = stages[Math.min(idx + 1, stages.length - 1)]; await api('/api/prospects/update', { method: 'POST', body: JSON.stringify({ id: btn.dataset.advance, pipeline_stage: next }) }); toast(`Advanced to ${next} ✓`); load().then(() => render()); } }; });
