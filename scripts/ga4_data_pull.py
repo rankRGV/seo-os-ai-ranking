@@ -763,17 +763,31 @@ def pull_client_data(client_id: str, property_id: str, days: int = 28, gsc_site_
         prev_ctr = prev["ctr"] if prev else 0
         prev_rank = prev["avg_rank"] if prev else 0
 
-        # Store metrics snapshot
+        # Update GSC metrics in the snapshot (aggregate from gsc_performance)
+        gsc_agg = conn.execute(
+            "SELECT COALESCE(SUM(clicks),0) as c, COALESCE(SUM(impressions),0) as i FROM gsc_performance WHERE client_id=?",
+            (client_id,)
+        ).fetchone()
+        gsc_avg_pos = conn.execute(
+            "SELECT AVG(position) FROM gsc_performance WHERE client_id=? AND position > 0",
+            (client_id,)
+        ).fetchone()
+        gsc_clicks = gsc_agg["c"]
+        gsc_impressions = gsc_agg["i"]
+        gsc_avg_rank = round(gsc_avg_pos[0], 1) if gsc_avg_pos[0] else 0
+        gsc_ctr = round(gsc_clicks / gsc_impressions, 4) if gsc_impressions > 0 else 0
+
+        # Store metrics snapshot — preserve GSC data, add GA4 sessions as conversions placeholder
         metrics = {
-            "sessions": total_sessions,
-            "sessions_delta": total_sessions - prev_clicks,
-            "engaged_sessions": total_engaged,
-            "engaged_sessions_delta": total_engaged - prev_impressions,
-            "engagement_rate": round(engagement_rate, 4),
-            "engagement_rate_delta": round(engagement_rate - prev_ctr, 4),
-            "avg_session_duration": 0,
-            "avg_session_duration_delta": 0,
-            "conversions": total_conversions,
+            "sessions": gsc_clicks,
+            "sessions_delta": gsc_clicks - prev_clicks,
+            "engaged_sessions": gsc_impressions,
+            "engaged_sessions_delta": gsc_impressions - prev_impressions,
+            "engagement_rate": gsc_ctr,
+            "engagement_rate_delta": round(gsc_ctr - prev_ctr, 4),
+            "avg_session_duration": gsc_avg_rank,
+            "avg_session_duration_delta": round(gsc_avg_rank - prev_rank, 1),
+            "conversions": total_sessions,
         }
 
         mid = store_metrics_snapshot(conn, client_id, metrics, f"Last {days} days")

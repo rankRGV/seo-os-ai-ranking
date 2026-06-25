@@ -228,16 +228,30 @@ def main():
             print(f"  ✓ {stored} query×page rows stored")
             print(f"  ✓ Totals: {result['total_clicks']} clicks, {result['total_impressions']} impressions")
             
-            # Update metrics_snapshots with correct GSC totals
+            # Update metrics_snapshots — aggregate from gsc_performance for accurate totals
+            # (The GSC daily-dimension API returns unreliable aggregates, so we sum query×page rows)
             client_id = client["id"]
+            agg = conn.execute(
+                "SELECT COALESCE(SUM(clicks),0) as total_clicks, COALESCE(SUM(impressions),0) as total_impressions FROM gsc_performance WHERE client_id=?",
+                (client_id,)
+            ).fetchone()
+            total_clicks = agg["total_clicks"]
+            total_impressions = agg["total_impressions"]
+            avg_pos = conn.execute(
+                "SELECT AVG(position) FROM gsc_performance WHERE client_id=? AND position > 0",
+                (client_id,)
+            ).fetchone()
+            avg_rank = round(avg_pos[0], 1) if avg_pos[0] else 0
+            ctr = round(total_clicks / total_impressions, 4) if total_impressions > 0 else 0
+
             existing = conn.execute(
                 "SELECT id FROM metrics_snapshots WHERE client_id=? AND period_label='Last 28 days'",
                 (client_id,)
             ).fetchone()
             if existing:
                 conn.execute(
-                    "UPDATE metrics_snapshots SET clicks=?, impressions=? WHERE id=?",
-                    (result["total_clicks"], result["total_impressions"], existing["id"])
+                    "UPDATE metrics_snapshots SET clicks=?, impressions=?, ctr=?, avg_rank=? WHERE id=?",
+                    (total_clicks, total_impressions, ctr, avg_rank, existing["id"])
                 )
             else:
                 import uuid as _uuid
@@ -245,9 +259,9 @@ def main():
                 conn.execute(
                     "INSERT INTO metrics_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (mid, client_id, "Last 28 days",
-                     result["total_clicks"], 0,
-                     result["total_impressions"], 0,
-                     0, 0, 0, 0, 0,
+                     total_clicks, 0,
+                     total_impressions, 0,
+                     ctr, 0, avg_rank, 0, 0,
                      datetime.now(timezone.utc).replace(microsecond=0).isoformat())
                 )
         else:
