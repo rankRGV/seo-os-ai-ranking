@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -21,7 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-DB_PATH = ROOT / "data" / "seo-os.sqlite"
+DB_PATH = Path(os.environ.get("SEO_OS_DB_PATH", str(ROOT / "data" / "seo-os.sqlite")))
 UTC = dt.timezone.utc
 
 SCHEMA = """
@@ -150,17 +151,20 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS gsc_performance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL,
+  site_url TEXT NOT NULL DEFAULT '',
   query TEXT NOT NULL DEFAULT '',
   page TEXT NOT NULL DEFAULT '',
   clicks INTEGER NOT NULL DEFAULT 0,
   impressions INTEGER NOT NULL DEFAULT 0,
   ctr REAL NOT NULL DEFAULT 0,
   position REAL NOT NULL DEFAULT 0,
+  date TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gsc_client ON gsc_performance(client_id);
+CREATE INDEX IF NOT EXISTS idx_gsc_date ON gsc_performance(client_id, date);
 CREATE INDEX IF NOT EXISTS idx_gsc_created ON gsc_performance(created_at);
 CREATE TABLE IF NOT EXISTS client_health (
   id TEXT PRIMARY KEY,

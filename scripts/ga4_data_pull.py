@@ -17,6 +17,7 @@ import sqlite3
 import sys
 import urllib.request
 import urllib.error
+import urllib.parse
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -569,7 +570,8 @@ def pull_gsc_data(token: str, site_url: str, days: int = 28) -> dict:
 
 def gsc_request(token: str, site_url: str, payload: dict) -> dict | None:
     """Make a GSC searchAnalytics.query request."""
-    url = f"https://www.googleapis.com/webmasters/v3/sites/{site_url}/searchAnalytics/query"
+    encoded_site = urllib.parse.quote(site_url, safe="")
+    url = f"https://www.googleapis.com/webmasters/v3/sites/{encoded_site}/searchAnalytics/query"
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, method="POST", headers={
         "Authorization": f"Bearer {token}",
