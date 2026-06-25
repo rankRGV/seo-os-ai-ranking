@@ -2,7 +2,7 @@ const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
   ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Activity Log','pulse'], ['Settings','settings']
 ];
-let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null, prospectFilter:'all', prospectSearch:'', sidebarCollapsed:false };
+let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', perfRange:28, reportClient:null, data:null, prospectFilter:'all', prospectSearch:'', sidebarCollapsed:false };
 
 const $ = sel => document.querySelector(sel);
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -59,7 +59,7 @@ async function api(path, opts={}){
 }
 async function load(client=state.client){
   state.client = client;
-  state.data = await api(`/api/summary?client=${encodeURIComponent(client)}&days=${state.oppDays}`);
+  state.data = await api(`/api/summary?client=${encodeURIComponent(client)}&days=${state.oppDays}&metric_days=${state.perfRange}`);
   render();
 }
 
@@ -186,16 +186,19 @@ function commandCenter(){
     ${section('Client Health','Overall SEO health per client — green thriving, yellow needs attention, red at-risk','activity','purple',undefined, healthWidget)}
     ${section('Google Business Profile','Local business health — views, actions, reviews for local clients','building','green',undefined, gbpWidget)}
     ${section('Needs Your Attention Today','Decisions and approvals the agents are waiting on','alert','red',`${needs.length} items`, simpleTable(['Client','Item','Type','Priority','Why it matters','Action'], needs))}
-    <h2>28-Day Performance <span class="muted" style="font-size:13px;font-weight:500">GSC clicks and impressions</span></h2>${perf}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">Performance <span class="muted" style="font-size:13px;font-weight:500">GSC clicks and impressions</span></h2><div class="perf-range" style="display:flex;gap:4px"><button class="range-btn ${state.perfRange===1?'active':''}" data-perf-range="1">24h</button><button class="range-btn ${state.perfRange===7?'active':''}" data-perf-range="7">7d</button><button class="range-btn ${state.perfRange===28?'active':''}" data-perf-range="28">28d</button></div></div>${perf}
     ${section('High-Impact SEO Opportunities','High impressions, weak clicks — ranked by impressions','trend','green',undefined, simpleTable(['Client','Page','Problem','Priority','Impr.','Clicks','CTR','Pos.'], oppRows), '<button class="link-action" data-open-opps>View all →</button>')}
     ${section('Client Health Summary','Workload and next action per site','building','blue',undefined, simpleTable(['Client','Status','Appr.','Tasks','Jobs','Opps','Connections','Recommended next action'], healthRows))}
     ${commandPreviews(d)}
     ${section('Agent Activity','Important outcomes only — not a Discord transcript','pulse','mutedIcon',undefined, simpleTable(['Time','Client','Source','Type','What happened','Next action'], activities))}
     ${section('Quick Actions','Send updates to Discord, trigger data refresh, and manage notifications','settings','blue',undefined, '<button class="btn primary" id="notifyDiscordBtn">Send to Discord</button> <button class="btn" id="createThreadBtn">Create Client Thread</button> <button class="btn" id="ga4PullBtn">Pull GA4 Now</button> <button class="btn" id="gscPullBtn">Pull GSC Now</button> <span class="muted" style="font-size:12px">Last GA4 pull: <span id="lastGa4Pull">—</span> · Last GSC pull: <span id="lastGscPull">—</span></span>')}`;
-  setTimeout(()=>document.querySelectorAll('[data-open-approvals]').forEach(b=>b.onclick=()=>{state.section='Approvals';render()}),0);
-  setTimeout(()=>document.querySelectorAll('[data-open-opps]').forEach(b=>b.onclick=()=>{state.section='Opportunities';render()}),0);
-  setTimeout(()=>document.querySelectorAll('[data-section="Opportunities"]').forEach(b=>b.onclick=()=>{if(b.dataset.client){load(b.dataset.client)}else{state.section='Opportunities';render()}}),0);
-  setTimeout(()=>document.querySelectorAll('[data-open-schedule]').forEach(b=>b.onclick=()=>{state.section='Schedule';render()}),0);
+  setTimeout(()=>{
+    document.querySelectorAll('[data-open-approvals]').forEach(b=>b.onclick=()=>{state.section='Approvals';render()});
+    document.querySelectorAll('[data-open-opps]').forEach(b=>b.onclick=()=>{state.section='Opportunities';render()});
+    document.querySelectorAll('[data-section="Opportunities"]').forEach(b=>b.onclick=()=>{if(b.dataset.client){load(b.dataset.client)}else{state.section='Opportunities';render()}});
+    document.querySelectorAll('[data-open-schedule]').forEach(b=>b.onclick=()=>{state.section='Schedule';render()});
+    document.querySelectorAll('[data-perf-range]').forEach(b=>b.onclick=()=>{state.perfRange=parseInt(b.dataset.perfRange)||28;load(state.client).then(()=>render())});
+  },0);
   return page('SEO Command Center','AI agents, SEO data, approvals, schedules, and client work in one operating layer.', body);
 }
 

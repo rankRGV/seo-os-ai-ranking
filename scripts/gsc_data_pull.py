@@ -46,9 +46,10 @@ def gsc_request(token, site_url, payload):
         code = getattr(e, 'code', '?')
         # If 401, try refreshing token once
         if code == 401:
-            token = refresh_token()
+            refreshed = refresh_token()
+            new_token = refreshed.get("token", refreshed) if isinstance(refreshed, dict) else refreshed
             req2 = urllib.request.Request(url, data=data, method="POST", headers={
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"Bearer {new_token}",
                 "Content-Type": "application/json"
             })
             try:

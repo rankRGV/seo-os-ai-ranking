@@ -390,9 +390,20 @@ def generate_content_briefs(conn: sqlite3.Connection, client_id: str, days: int 
     return briefs
 
 
-def summary(conn: sqlite3.Connection, client_id: str = "all", days: int = 0) -> dict:
+def summary(conn: sqlite3.Connection, client_id: str = "all", days: int = 0, metric_days: int = 0) -> dict:
     clients = rows(conn, "SELECT * FROM clients ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, name")
     metrics = rows(conn, "SELECT * FROM metrics_snapshots")
+    # Filter metrics by requested period if specified
+    if metric_days > 0:
+        period_label = f"Last {metric_days} days"
+        filtered = [m for m in metrics if m.get("period_label") == period_label]
+        if filtered:
+            metrics = filtered
+    elif days > 0:
+        period_label = f"Last {days} days"
+        filtered = [m for m in metrics if m.get("period_label") == period_label]
+        if filtered:
+            metrics = filtered
     approvals = rows(conn, "SELECT * FROM approval_requests ORDER BY CASE status WHEN 'needs_review' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, updated_at DESC")
     # Filter opportunities by date range if days specified
     if days > 0:
@@ -619,12 +630,17 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/summary":
             client = parse_qs(parsed.query).get("client", ["all"])[0]
             days_str = parse_qs(parsed.query).get("days", ["0"])[0]
+            metric_days_str = parse_qs(parsed.query).get("metric_days", ["0"])[0]
             try:
                 days = int(days_str)
             except (ValueError, TypeError):
                 days = 0
+            try:
+                metric_days = int(metric_days_str)
+            except (ValueError, TypeError):
+                metric_days = 0
             with connect() as conn:
-                self.json_response(summary(conn, client, days=days))
+                self.json_response(summary(conn, client, days=days, metric_days=metric_days))
             return
         if parsed.path == "/api/health":
             with connect() as conn:
