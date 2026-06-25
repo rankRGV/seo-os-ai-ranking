@@ -1,0 +1,45 @@
+/* Prospects Module Styles */
+.pipeline-bar{display:flex;gap:8px;margin-bottom:20px;overflow-x:auto;padding-bottom:4px}
+.pipeline-stage{flex:1;min-width:90px;text-align:center;padding:12px 8px;border-radius:10px;background:#fff;border:1px solid var(--line);transition:all .2s}
+.pipeline-stage.active{border-color:var(--green);background:var(--greenSoft)}
+.pipeline-count{font-size:22px;font-weight:800;color:var(--text)}
+.pipeline-label{font-size:10px;font-weight:700;color:var(--subtle);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+.prospect-stats{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.prospect-chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700}
+.prospect-chip.status-new{background:#E7EEFE;color:#1D4ED8}
+.prospect-chip.status-contacted{background:#E7F5EC;color:#15803d}
+.prospect-chip.status-replied{background:#FFF3CD;color:#856404}
+.prospect-chip.status-pitched{background:#F1E9FB;color:#6D28D9}
+.prospect-chip.status-closed_won{background:#E7F5EC;color:#166337}
+.prospect-chip.status-closed_lost,.prospect-chip.status-not_interested{background:#FBE7E4;color:#9E2B20}
+.prospect-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.search-input{border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:12.5px;min-width:220px;outline:none}
+.search-input:focus{border-color:var(--green)}
+.rank-cell{text-align:center;font-weight:800;color:#AAB5B3}
+.score-cell{text-align:center;font-weight:700;color:var(--text)}
+.prospect-actions{display:flex;gap:4px;justify-content:center}
+.icon-btn{width:28px;height:28px;border:1px solid var(--line);background:#fff;border-radius:6px;font-size:11px;cursor:pointer;display:grid;place-items:center;transition:all .15s}
+.icon-btn:hover{background:var(--greenSoft);border-color:var(--green)}
+.icon-btn:last-child:hover{background:var(--redSoft);border-color:#C0392B}
+/* Modal */
+.modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:grid;place-items:center;padding:20px}
+.prospect-modal{background:#fff;border-radius:16px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--line)}
+.modal-head h3{margin:0;font-size:16px;font-weight:800}
+.modal-close{background:none;border:0;font-size:22px;cursor:pointer;color:var(--subtle);width:32px;height:32px;border-radius:999px;display:grid;place-items:center}
+.modal-close:hover{background:#f1f5f9}
+.modal-body{padding:18px 20px;display:grid;gap:10px}
+.modal-body label{font-size:11px;font-weight:700;color:var(--subtle);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+.modal-input{border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13px;outline:none;font-family:inherit}
+.modal-input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(22,99,55,.1)}
+textarea.modal-input{resize:vertical;min-height:60px}
+/* GBP Health Widget */
+.gbp-health-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.gbp-card{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff;transition:all .15s}
+.gbp-card.green{border-left:4px solid var(--green)}
+.gbp-card.yellow{border-left:4px solid #D97706}
+.gbp-card.red{border-left:4px solid #C0392B}
+.gbp-card.not_connected{border-left:4px solid #94A3B8}
+.gbp-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.gbp-metrics{display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--subtle);margin-bottom:8px}
+.gbp-reviews{font-size:12px;font-weight:600;color:var(--text)}

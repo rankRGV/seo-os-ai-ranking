@@ -1,124 +1,107 @@
-# SEO OS AI Ranking
+# SEO OS AI Ranking — RankRGV Fork
 
 A reusable starter kit for running an SEO operating system with Hermes Agent and a VPS-local custom dashboard.
 
-SEO OS gives an agency owner or business owner a structured way to run SEO work with:
+This fork (`rankRGV/seo-os-ai-ranking`) extends the upstream NicoSKOOL/seo-os-ai-ranking with agency-specific features for local SEO clients.
 
-- a custom SEO OS Command Center dashboard
-- local SQLite operational state
-- per-client Hermes profiles
-- per-client VPS workspaces
-- automatic dashboard updates from Discord onboarding
-- Discord confirmation after client setup
-- scheduled SEO checks and reports
-- approval-gated agent work
-- CTR tests
-- review management workflows
-- content and client expertise intake
-- reusable client knowledge libraries
+## What's live
 
-This repo is intentionally a template. It ships with fake demo data only. Do not commit client data, API tokens, private Discord IDs, Search Console exports, analytics exports, SQLite databases, logs, generated reports, or local workspace files.
+- **Dashboard** at port 8787 (teal theme #1c4642)
+- **Daily 9am cron** pulls GA4 + GSC data for all active clients
+- **Health score widget** per client (rank-based scoring)
+- **Content Briefs tab** (100 briefs, filterable by priority)
+- **Opportunities** from both GA4 and GSC with source badges (GA4 blue / GSC green)
+- **Date-range filter** (7/28/90 days)
+- **Token refresh** on startup + background daemon every 50 min
+- **Patch script** at `custom/apply-patches.sh` for upstream updates
 
-## Mental model
+## New in this fork
 
-```text
-Custom SEO OS Dashboard = operating board
-SQLite = local template/demo state
-Hermes = worker
-- Discord = operator notification layer
-- Hermes profiles = client separation
-VPS file system = internal workspace and data store
-Google Docs / clean HTML = polished reports and client-facing deliverables
-Google Sheets = optional export layer, not the primary dashboard
-```
+### Prospecting Module (`prospects.py`)
+Full CRM pipeline for local business prospecting:
+- Add/search/filter prospects
+- Pipeline stages: New → Contacted → Pitched → Negotiation → Closed-Won
+- FB DM opener generator (auto-personalized with rank, city, niche)
+- Activity logging per prospect
+- Prospects tab in navigation
+
+### Client Onboarding Flow
+Settings page includes an active "Add Client" form:
+- Client ID, name, domain, role/niche
+- Client type selector (local vs national)
+- Auto-creates Hermes profile, workspace, and dashboard row
+- Activity event logged on creation
+
+### Google Business Profile Health Monitor (`gbp_monitor.py`)
+Tracks GBP metrics for local businesses:
+- Views (search + maps), searches (direct + discovery)
+- Actions (calls, website clicks, directions, messages)
+- Review average + count, posts, photos
+- Health score 0-100 (weighted: actions 30%, views 20%, reviews 25%, content 25%)
+- Green/yellow/red status cards in Command Center widget
+- Daily 10am cron auto-runs
+- Demo data fallback when API not connected
+
+**To enable live GBP data:**
+1. Enable "Business Profile Performance API" in Google Cloud Console
+2. Add scope `https://www.googleapis.com/auth/business.manage` to OAuth token
+3. Request quota increase (default is 0/min for new projects)
+4. Run `python3 gbp_monitor.py --live`
+
+### Local vs National client types
+- `local` — GBP health monitor applies, map pack tracking
+- `national` — GBP monitor skipped, e-commerce/wide-reach focus
 
 ## Quick start
 
 ```bash
-git clone https://github.com/NicoSKOOL/seo-os-ai-ranking.git
-cd seo-os-ai-ranking
-python3 server.py --host 127.0.0.1 --port 8787 --reset
+cd seo-os-dashboard
+python3 server.py --port 8787
 ```
 
-Then open:
+Then open `http://127.0.0.1:8787` (use SSH tunnel for VPS).
+
+## Architecture
 
 ```text
-http://127.0.0.1:8787
+Custom SEO OS Dashboard = operating board (port 8787)
+SQLite = local operational state (data/seo-os.sqlite)
+Hermes = worker
+Discord = operator notification layer
+Hermes profiles = client separation
+VPS file system = internal workspace and data store
+Google Docs / clean HTML = polished reports
+Google Sheets = outreach tracker (optional export layer)
 ```
 
-If this is running on a VPS, use an SSH tunnel or a protected reverse proxy. Do not expose the dashboard publicly without authentication.
+## Data sources
 
-## What v1 includes
+| Source | API | Auth |
+|--------|-----|------|
+| Google Search Console | webmasters.readonly | OAuth |
+| GA4 | analytics.readonly | OAuth |
+| Google Business Profile | business.manage | OAuth (pending quota approval) |
+| Google Sheets | spreadsheets | OAuth |
+| Google Drive | drive | OAuth |
 
-- Command Center
-- Clients / Sites
-- Approvals
-- Opportunities
-- Agent Tasks
-- Content pipeline
-- Schedule
-- CTR Tests
-- Activity Log
-- Reports
-- Settings / Routing
+## Client sites
 
-## Template data policy
-
-The dashboard seeds fake clients and fake metrics on first run. The seed data exists only to demonstrate the workflow and UI.
-
-Never commit:
-
-- `data/` SQLite databases, WAL files, raw exports, or performance snapshots
-- `logs/` files
-- `generated/` plans or reports
-- real client workspace paths
-- private Discord chat/channel IDs or thread IDs
-- Search Console, GA4, Google Workspace, Cloudflare, Zernio, or email credentials
-- real customer/client names unless they are intentionally public demo examples
-
-## Client workspace setup
-
-The setup wizard can create a local workspace skeleton for a new client:
-
-```bash
-python3 scripts/setup_seo_os.py \
-  --client-name "Example Roofing" \
-  --domain example.com \
-  --client-type local-seo \
-  --site-url https://example.com/ \
-  --main-offer "Roof repair and replacement" \
-  --target-audience "Homeowners in Austin" \
-  --conversion-goal "Booked inspection calls" \
-  --content-delivery-mode google_doc \
-  --cms wordpress \
-  --dry-run
-```
-
-Remove `--dry-run` only when you are ready to create local workspace files. When `--discord-channel` is present, setup also creates the per-client Hermes profile by default, upserts the local SEO OS dashboard when its SQLite DB exists, and can send a Discord confirmation message.
-
-## Product architecture direction
-
-SEO OS should own scheduling, approvals, work tracking, and reporting inside the custom dashboard. A Sheet can be added later as a clean export or public-friendly view, but it should not be treated as the main operating system.
-
-Recommended member setup:
-
-1. Connect GSC.
-2. Connect GA4.
-3. Connect review source, such as a GBP/review provider.
-4. SEO OS creates/owns managed jobs for refreshes, opportunity scoring, and review monitoring.
-
-Model policy:
-
-- No model for raw API pulls and normalization.
-- Cheap model for labeling, lightweight summaries, review-response drafts, and opportunity explanations.
-- Stronger model only for strategic plans, SERP synthesis, and approved content/change recommendations.
-
-## Client filtering and onboarding defaults
-
-- Every visible tab or dashboard view must respect the active client filter. If My Inclusion is selected, CTR Tests, Schedule, Content, Approvals, Opportunities, Tasks, Activity, Reports, and Performance must show only My Inclusion rows. Global rows are allowed only in the All Clients view.
-- Adding a client from Discord must create/update the client registry/dashboard row, create a per-client Hermes profile, create the workspace, queue setup tasks, and send a completion message back to the same Discord channel/thread.
-- Never create a duplicate client because of slug differences. Check existing clients by exact domain and common domain variants before inserting a new row.
+Custom Astro on Vercel (NOT WordPress). No GA4 conversion tracking set up yet — needs GTM container snippet on Astro sites.
 
 ## Safety defaults
 
 Dashboard approvals update state and create bounded tasks. They do not publish, deploy, redirect, noindex, canonicalize, delete pages, or send outreach. Those actions need separate explicit approval.
+
+## Never commit
+
+- `data/` SQLite databases, WAL files
+- `logs/` files
+- Real client data or credentials
+- API tokens, Discord IDs, OAuth secrets
+- Generated reports or local workspace files
+
+## Upstream
+
+- Upstream: github.com/NicoSKOOL/seo-os-ai-ranking
+- Fork: github.com/rankRGV/SEO-OS-AI-ranking
+- Sync: `git fetch upstream && git merge main && git rebase discord-adaptation`

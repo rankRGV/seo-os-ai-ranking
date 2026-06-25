@@ -59,11 +59,44 @@ def decide_approval(approval_id, decision, note=""):
     from datetime import datetime, timezone
     t = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     with db() as conn:
+        # Get approval details before updating
+        appr = conn.execute("SELECT * FROM approval_requests WHERE id=?", (approval_id,)).fetchone()
         conn.execute(
             "UPDATE approval_requests SET status=?, decision_note=?, updated_at=? WHERE id=?",
             (decision, note, t, approval_id)
         )
         conn.commit()
+        # Auto-notify (best-effort, same pattern as server.py)
+        if appr:
+            emoji_map = {"approved": "✅", "rejected": "❌", "needs_review": "📋", "needs_changes": "🔄"}
+            emoji = emoji_map.get(decision, "📣")
+            decision_label = decision.replace("_", " ").title()
+            appr_d = dict(appr)
+            notify_msg = (
+                f"{emoji} **Approval {decision_label}**\n"
+                f"**{appr_d['title']}**\n"
+                f"Client: {appr_d['client_id']}\n"
+            )
+            if appr_d.get("source_url"):
+                notify_msg += f"Page: {appr_d['source_url']}\n"
+            if note:
+                notify_msg += f"Note: {note}\n"
+            # Queue via notification_queue table (server.py notifier picks it up)
+            try:
+                import uuid as _uuid
+                nid = f"notif_{_uuid.uuid4().hex[:10]}"
+                thread_row = conn.execute(
+                    "SELECT discord_thread_id FROM clients WHERE id=?", (appr_d["client_id"],)
+                ).fetchone()
+                thread_id = thread_row["discord_thread_id"] if thread_row else ""
+                conn.execute(
+                    "INSERT INTO notification_queue (id, client_id, thread_id, message, created_at) VALUES (?,?,?,?,?)",
+                    (nid, appr_d["client_id"], thread_id, notify_msg, t),
+                )
+                conn.commit()
+            except Exception as e:
+                import sys as _sys
+                print(f"Notification queue error: {e}", file=_sys.stderr)
     return True
 
 def get_opportunities(client_id=None, limit=5):

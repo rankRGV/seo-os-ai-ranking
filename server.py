@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sqlite3
+import sys
 import uuid
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +31,7 @@ CREATE TABLE IF NOT EXISTS clients (
   name TEXT NOT NULL,
   domain TEXT NOT NULL,
   role TEXT NOT NULL,
+  client_type TEXT NOT NULL DEFAULT 'local',
   status TEXT NOT NULL,
   health_score INTEGER NOT NULL,
   hermes_profile TEXT NOT NULL,
@@ -146,6 +149,26 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS client_health (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL UNIQUE,
+  score INTEGER NOT NULL DEFAULT 50,
+  status TEXT NOT NULL DEFAULT 'yellow',
+  components_json TEXT NOT NULL DEFAULT '{}',
+  pages_ranking INTEGER NOT NULL DEFAULT 0,
+  high_priority_opps INTEGER NOT NULL DEFAULT 0,
+  total_opportunities INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS notification_queue (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  sent_at TEXT NOT NULL DEFAULT '',
+  retries INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -181,88 +204,127 @@ def init_db(seed: bool = True) -> None:
 
 
 def seed_db(conn: sqlite3.Connection) -> None:
-    """Seed fake demo data only. Replace this through setup/onboarding in real installs."""
+    """Seed minimal starter data for real installs. Demo clients removed — add clients via onboarding."""
     t = now()
-    clients = [
-        ("demo-local", "Demo Local Roofing", "demo-roofing.example", "Local SEO client", "active", 82, "demo-local-seo", "not_bound", "", "connected", "connected", "connected", "not_connected", "/opt/seo-os/workspaces/demo-roofing"),
-        ("demo-saas", "Demo SaaS Company", "demo-saas.example", "B2B SaaS client", "active", 76, "demo-saas-seo", "not_bound", "", "connected", "needs_setup", "connected", "not_applicable", "/opt/seo-os/workspaces/demo-saas"),
-        ("setup-client", "New Client Template", "new-client.example", "Template client", "setup", 45, "new-client-seo", "not_bound", "", "needs_setup", "needs_setup", "needs_setup", "needs_setup", "/opt/seo-os/workspaces/new-client"),
-    ]
-    conn.executemany("INSERT INTO clients VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [(*c, t, t) for c in clients])
-
-    metrics = [
-        ("metric_local", "demo-local", "Last 28 days", 628, 94, 18420, 3100, 3.41, 0.32, 8.7, -1.4, 37, t),
-        ("metric_saas", "demo-saas", "Last 28 days", 312, -18, 9610, 1440, 3.25, -0.41, 14.2, 0.8, 9, t),
-        ("metric_setup", "setup-client", "Setup pending", 0, 0, 0, 0, 0, 0, 0, 0, 0, t),
-    ]
-    conn.executemany("INSERT INTO metrics_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", metrics)
-
-    opps = [
-        ("opp_local_service", "demo-local", "https://demo-roofing.example/roof-repair/", "High impressions but weaker CTR than similar service pages", "Low CTR", "high", "More booked inspection calls", "high", "low", 4200, 74, 1.76, 5.8, "Compare local SERP snippets, then draft title/meta variants for approval.", "new"),
-        ("opp_local_city", "demo-local", "https://demo-roofing.example/locations/austin/", "Page ranks near the top but lacks proof and FAQs", "Content refresh", "medium", "More local-qualified enquiries", "medium", "medium", 1900, 51, 2.68, 7.4, "Refresh content with proof, FAQs, internal links, and local schema recommendation.", "task_created"),
-        ("opp_saas_feature", "demo-saas", "https://demo-saas.example/features/reporting/", "Position is strong but CTR is below expected range", "Low CTR", "high", "More trial starts from existing rankings", "high", "low", 2600, 29, 1.12, 4.1, "Draft CTR test and compare positioning against top SERP snippets.", "new"),
-        ("opp_saas_blog", "demo-saas", "https://demo-saas.example/blog/seo-reporting-template/", "Informational post can better route readers to the product", "SERP gap", "medium", "More assisted conversions", "medium", "medium", 1700, 33, 1.94, 9.8, "Run SERP gap analysis, add examples, then request approval for draft changes.", "needs_approval"),
-    ]
-    conn.executemany(
-        "INSERT INTO opportunities VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [(*o, json.dumps({"source": "fake seeded demo snapshot", "window": "28 days"}), t, t) for o in opps],
-    )
-
-    approvals = [
-        ("appr_saas_blog", "demo-saas", "Run SERP gap plan for reporting-template article", "plan", "low", "needs_review", "Create a content refresh plan and draft changes for review only.", "The page has impressions and mid-page-one visibility but weak click-through and product routing.", "https://demo-saas.example/blog/seo-reporting-template/", "medium", "Approving creates a planning task only. Production remains separately approval-gated."),
-        ("appr_local_meta", "demo-local", "Draft title/meta CTR test for roof repair page", "plan", "low", "approved", "Draft three title variants and two meta descriptions. Do not publish.", "The page receives meaningful impressions and could improve CTR without creating a new URL.", "https://demo-roofing.example/roof-repair/", "high", "Approved for drafting only, not publishing."),
-        ("appr_policy", "all", "Production changes remain approval-gated", "policy", "high", "active", "Keep as non-negotiable guardrail.", "Deploys, publishing, redirects, canonicals, noindex, deletions, and outreach need explicit human approval.", "", "high", "Policy row, not an executable approval."),
-    ]
-    conn.executemany("INSERT INTO approval_requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [(*a, t, t, "") for a in approvals])
-
-    tasks = [
-        ("task_local_meta", "demo-local", "Draft CTR test for roof repair page", "high", "ready", "Approved plan", "demo-local-seo", "https://demo-roofing.example/roof-repair/", "Prepare 3 title variants and 2 meta descriptions for approval.", "Production remains separately gated."),
-        ("task_local_city", "demo-local", "Plan location page refresh", "medium", "backlog", "SEO opportunity", "demo-local-seo", "https://demo-roofing.example/locations/austin/", "Identify proof, FAQs, and internal links to add.", ""),
-        ("task_saas_blog", "demo-saas", "Wait for SERP gap plan approval", "high", "waiting_for_approval", "Approval request", "demo-saas-seo", "https://demo-saas.example/blog/seo-reporting-template/", "Wait for approval decision in dashboard.", ""),
-    ]
-    conn.executemany("INSERT INTO agent_tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [(*x, t, t) for x in tasks])
-
-    jobs = [
-        ("job_local_data", "demo-local", "Managed nightly SEO data refresh", "data_refresh", "Daily", "Tonight 02:00", "Today 02:04", "ok", "No model for pulls, cheap model for summaries", "GSC, GA4, sitemap, crawl", "Pulled fake demo metrics and refreshed opportunities.", "SEO OS managed scheduler"),
-        ("job_local_review", "demo-local", "Review monitor", "reviews", "Daily when connected", "Waiting for setup", "Never", "setup_needed", "Cheap model for draft replies only", "Review provider", "Connect review source to activate workflow.", "SEO OS managed scheduler"),
-        ("job_saas_data", "demo-saas", "Managed nightly SEO data refresh", "data_refresh", "Daily", "Tonight 02:30", "Today 02:34", "ok", "No model for pulls, cheap model for summaries", "GSC, sitemap, crawl", "Metrics updated, one approval remains pending.", "SEO OS managed scheduler"),
-    ]
-    conn.executemany("INSERT INTO managed_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", jobs)
-
-    events = [
-        ("ev_1", "all", "dashboard", "system", "complete", "SEO OS template dashboard initialized with fake demo data", "Connect real data sources in your own private install.", "", t),
-        ("ev_2", "demo-local", "managed_job", "data_refreshed", "complete", "Demo Local Roofing metrics and opportunities refreshed", "Review top CTR opportunities.", "", t),
-        ("ev_3", "demo-saas", "approval", "approval_requested", "waiting", "Demo SaaS content refresh awaiting decision", "Approve, reject, or request changes.", "", t),
-        ("ev_4", "setup-client", "setup", "integration_needed", "blocked", "New client needs GSC, GA4, and review-source setup", "Use Settings to track connections.", "", t),
-    ]
-    conn.executemany("INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)", events)
-
-    artifacts = [
-        ("art_1", "demo-local", "Demo local SEO baseline report", "report", "tracked", "Fake example report row for the template.", "reports/demo-local-baseline.md", t),
-        ("art_2", "demo-saas", "Demo SaaS opportunity report", "html_report", "tracked", "Fake example report row for the template.", "reports/demo-saas-opportunities.html", t),
-    ]
-    conn.executemany("INSERT INTO artifacts VALUES (?,?,?,?,?,?,?,?)", artifacts)
-
     settings = {
         "scheduler_mode": "SEO OS managed scheduler",
         "model_policy": "Data pulls use no model. Summaries and labeling use a cheap configured model. Strategic plans use a stronger model only after approval.",
         "safe_actions": "Dashboard approvals update state and create bounded tasks. Production actions need separate explicit approval.",
-        "onboarding_goal": "User connects GSC, GA4, and review data. SEO OS handles managed refresh jobs and approval loops.",
+        "onboarding_goal": "Add clients via the Add Client form. Connect GSC, GA4 for each client. SEO OS handles managed refresh jobs and approval loops.",
         "discord_webhook_url": "https://discord.com/api/webhooks/1504130721009373315/yYB7q3GPViCkjCToom70OZG0L-6rPiYdv1uqJQbIDGVUP7oSN0XLewHjCpXqh53p4DpX",
         "discord_channel_id": "1518799542554984522",
     }
     conn.executemany("INSERT INTO settings VALUES (?,?)", settings.items())
 
+    # System event for fresh start
+    conn.execute(
+        "INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)",
+        ("ev_1", "all", "dashboard", "system", "complete", "Dashboard initialized — add clients via the onboarding form to begin.", "", t)
+    )
 
-def summary(conn: sqlite3.Connection, client_id: str = "all") -> dict:
+
+def generate_content_briefs(conn: sqlite3.Connection, client_id: str, days: int = 28) -> list:
+    """Generate prioritized content briefs from GSC data for a client."""
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+
+    rows_data = conn.execute("""
+        SELECT query,
+               SUM(clicks) as total_clicks,
+               SUM(impressions) as total_impressions,
+               AVG(ctr) as avg_ctr,
+               AVG(position) as avg_position,
+               COUNT(DISTINCT page) as pages
+        FROM gsc_performance
+        WHERE client_id=? AND created_at >= ?
+        GROUP BY query
+        HAVING total_impressions >= 5
+        ORDER BY total_impressions DESC
+    """, (client_id, cutoff)).fetchall()
+
+    if not rows_data:
+        return []
+
+    briefs = []
+    seen_queries = set()
+
+    for row in rows_data:
+        query = row["query"]
+        clicks = row["total_clicks"]
+        impressions = row["total_impressions"]
+        avg_ctr = row["avg_ctr"] or 0
+        avg_pos = row["avg_position"] or 0
+
+        # Skip if already has an opportunity
+        existing = conn.execute(
+            "SELECT id FROM opportunities WHERE client_id=? AND evidence_json LIKE '%gsc_pull%' AND problem LIKE ?",
+            (client_id, f"%{query}%")
+        ).fetchone()
+        if existing:
+            continue
+
+        if avg_pos <= 10 and avg_ctr < 0.03 and impressions >= 10:
+            priority = "high"
+            opp_type = "Low CTR"
+            suggestion = f"Title/meta optimization for '{query}' — you're on page 1 but not getting clicks"
+            title_hint = f"Best {query.title()} [2026 Guide]"
+        elif avg_pos > 10 and avg_pos <= 20 and impressions >= 10:
+            priority = "medium"
+            opp_type = "SERP gap"
+            suggestion = f"Push '{query}' to page 1 — currently #{avg_pos:.0f}, content refresh or internal links could help"
+            title_hint = f"Complete Guide to {query.title()}"
+        elif avg_ctr < 0.01 and impressions >= 5:
+            priority = "medium"
+            opp_type = "SERP gap"
+            suggestion = f"High impressions ({impressions}) near-zero CTR — SERP feature may be stealing clicks"
+            title_hint = f"{query.title()} — What You Need to Know"
+        elif clicks == 0 and impressions >= 3:
+            priority = "low"
+            opp_type = "Striking distance"
+            suggestion = f"Impressions but no clicks — improve title tag appeal for '{query}'"
+            title_hint = f"{query.title()}: Expert Tips & Guide"
+        else:
+            continue
+
+        if query in seen_queries:
+            continue
+        seen_queries.add(query)
+
+        briefs.append({
+            "client_id": client_id,
+            "query": query,
+            "priority": priority,
+            "opportunity_type": opp_type,
+            "impressions": impressions,
+            "clicks": clicks,
+            "avg_ctr": round(avg_ctr, 4),
+            "avg_position": round(avg_pos, 1),
+            "suggested_title": title_hint,
+            "brief": suggestion,
+        })
+
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    briefs.sort(key=lambda x: (priority_order[x["priority"]], -x["impressions"]))
+    return briefs
+
+
+def summary(conn: sqlite3.Connection, client_id: str = "all", days: int = 0) -> dict:
     clients = rows(conn, "SELECT * FROM clients ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, name")
     metrics = rows(conn, "SELECT * FROM metrics_snapshots")
     approvals = rows(conn, "SELECT * FROM approval_requests ORDER BY CASE status WHEN 'needs_review' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, updated_at DESC")
-    opps = rows(conn, "SELECT * FROM opportunities ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, impressions DESC")
+    # Filter opportunities by date range if days specified
+    if days > 0:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        opps = rows(conn, "SELECT * FROM opportunities WHERE created_at >= ? ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, impressions DESC", (cutoff,))
+    else:
+        opps = rows(conn, "SELECT * FROM opportunities ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, impressions DESC")
     tasks = rows(conn, "SELECT * FROM agent_tasks ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, updated_at DESC")
     jobs = rows(conn, "SELECT * FROM managed_jobs ORDER BY CASE status WHEN 'setup_needed' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, next_run")
     events = rows(conn, "SELECT * FROM activity_events ORDER BY created_at DESC LIMIT 30")
     artifacts = rows(conn, "SELECT * FROM artifacts ORDER BY updated_at DESC")
+    gsc_rows = rows(conn, "SELECT client_id, query, page, SUM(clicks) as clicks, SUM(impressions) as impressions, AVG(ctr) as ctr, AVG(position) as position FROM gsc_performance GROUP BY client_id, query, page ORDER BY impressions DESC LIMIT 50")
+    gsc_total = one(conn, "SELECT COUNT(DISTINCT query) as q, COALESCE(SUM(clicks),0) as c, COALESCE(SUM(impressions),0) as i FROM gsc_performance")
     settings = {r["key"]: r["value"] for r in conn.execute("SELECT * FROM settings")}
 
     def match(row: dict) -> bool:
@@ -281,8 +343,21 @@ def summary(conn: sqlite3.Connection, client_id: str = "all") -> dict:
         "jobs": [j for j in jobs if match(j)],
         "events": [e for e in events if match(e)],
         "artifacts": [a for a in artifacts if match(a)],
+        "gsc": [g for g in gsc_rows if match(g)],
+        "gsc_total": {"queries": gsc_total["q"], "clicks": gsc_total["c"], "impressions": gsc_total["i"]},
         "settings": settings,
     }
+    # Client health scores
+    health_rows = rows(conn, "SELECT client_id, score, status, pages_ranking, high_priority_opps, total_opportunities, updated_at FROM client_health ORDER BY score DESC")
+    data["client_health"] = [dict(h) for h in health_rows]
+
+    # Content briefs (top 50 per client, high priority first)
+    brief_rows = []
+    for c in clients:
+        cbriefs = generate_content_briefs(conn, c["id"])
+        brief_rows.extend(cbriefs[:50])  # cap at 50 per client
+    data["content_briefs"] = brief_rows
+
     data["kpis"] = {
         "pending_approvals": sum(1 for a in approvals if a["status"] == "needs_review" and match(a)),
         "open_tasks": sum(1 for t in tasks if t["status"] not in ("done", "cancelled") and match(t)),
@@ -291,7 +366,115 @@ def summary(conn: sqlite3.Connection, client_id: str = "all") -> dict:
         "sites_monitored": len(visible_clients),
         "system_health": "OK" if not any(j["status"] == "failed" for j in jobs if match(j)) else "Issue",
     }
+
+    # GBP health for local clients
+    try:
+        from gbp_monitor import init_gbp, get_latest_gbp_metrics, calculate_gbp_health_score
+        init_gbp()
+        gbp_data = []
+        for c in visible_clients:
+            if c.get("client_type") == "local":
+                m = get_latest_gbp_metrics(conn, c["id"])
+                if m:
+                    score = calculate_gbp_health_score(m)
+                    gbp_data.append({
+                        "client_id": c["id"],
+                        "name": c["name"],
+                        "score": score,
+                        "status": m.get("status", "ok"),
+                        "views": m.get("views_search", 0) + m.get("views_maps", 0),
+                        "calls": m.get("actions_call", 0),
+                        "website": m.get("actions_website", 0),
+                        "directions": m.get("actions_directions", 0),
+                        "review_avg": m.get("review_average", 0),
+                        "review_count": m.get("review_count", 0),
+                    })
+        data["gbp_health"] = gbp_data
+    except (ImportError, Exception):
+        data["gbp_health"] = []
+
     return data
+
+
+def queue_notification(conn: sqlite3.Connection, client_id: str, message: str) -> str:
+    """Add a notification to the queue for the next notifier tick."""
+    t = now()
+    nid = uid("notif")
+    thread_id = ""
+    row = one(conn, "SELECT discord_thread_id FROM clients WHERE id=?", (client_id,))
+    if row and row.get("discord_thread_id"):
+        thread_id = row["discord_thread_id"]
+    conn.execute(
+        "INSERT INTO notification_queue (id, client_id, thread_id, message, created_at) VALUES (?,?,?,?,?)",
+        (nid, client_id, thread_id, message, t),
+    )
+    conn.commit()
+    return nid
+
+
+def send_discord_notification(thread_id: str, message: str, bot_token: str) -> bool:
+    """Send a message to a Discord thread via the Bot token API. Returns True on success."""
+    if not thread_id:
+        return False
+    try:
+        import urllib.request as _req
+        url = f"https://discord.com/api/v10/channels/{thread_id}/messages"
+        payload = json.dumps({"content": message[:2000]}).encode()
+        headers = {
+            "Authorization": f"Bot {bot_token}",
+            "Content-Type": "application/json",
+            "User-Agent": "SEO-OS-Dashboard/1.0",
+        }
+        req_obj = _req.Request(url, data=payload, headers=headers, method="POST")
+        _req.urlopen(req_obj, timeout=10)
+        return True
+    except Exception as e:
+        print(f"Discord notification error: {e}", file=sys.stderr)
+        return False
+
+
+def get_bot_token(conn: sqlite3.Connection) -> str:
+    """Get the Discord bot token — from env, .env file, or DB settings."""
+    import os as _os
+    # Check environment first
+    token = _os.environ.get("DISCORD_BOT_TOKEN", "")
+    if token:
+        return token
+    # Check .env file
+    env_path = ROOT / ".env"
+    if env_path.exists():
+        for _line in env_path.read_text().splitlines():
+            _line = _line.strip()
+            if _line.startswith("DISCORD_BOT_TOKEN="):
+                return _line.split("=", 1)[1].strip().strip('"').strip("'")
+    # Check DB settings
+    row = one(conn, "SELECT value FROM settings WHERE key='discord_bot_token'")
+    return row["value"] if row else ""
+
+
+def notifier_loop() -> None:
+    """Background thread: drain notification_queue every 5 seconds."""
+    import time
+    while True:
+        try:
+            with connect() as conn:
+                bot_token = get_bot_token(conn)
+                if not bot_token:
+                    time.sleep(5)
+                    continue
+                pending = rows(conn, "SELECT * FROM notification_queue WHERE sent_at='' ORDER BY created_at LIMIT 10")
+                for n in pending:
+                    ok = send_discord_notification(n["thread_id"], n["message"], bot_token)
+                    t = now()
+                    if ok:
+                        conn.execute("UPDATE notification_queue SET sent_at=? WHERE id=?", (t, n["id"]))
+                    else:
+                        conn.execute("UPDATE notification_queue SET retries=retries+1 WHERE id=?", (n["id"]))
+                if pending:
+                    conn.commit()
+        except Exception as e:
+            print(f"Notifier loop error: {e}", file=sys.stderr)
+        time.sleep(5)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -325,19 +508,72 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/summary":
             client = parse_qs(parsed.query).get("client", ["all"])[0]
+            days_str = parse_qs(parsed.query).get("days", ["0"])[0]
+            try:
+                days = int(days_str)
+            except (ValueError, TypeError):
+                days = 0
             with connect() as conn:
-                self.json_response(summary(conn, client))
+                self.json_response(summary(conn, client, days=days))
             return
         if parsed.path == "/api/health":
             with connect() as conn:
                 count = one(conn, "SELECT COUNT(*) AS n FROM clients")
             self.json_response({"ok": True, "clients": count["n"], "db": str(DB_PATH)})
             return
+        if parsed.path == "/api/notification-queue/status":
+            with connect() as conn:
+                pending = one(conn, "SELECT COUNT(*) as n FROM notification_queue WHERE sent_at=''")["n"]
+                sent = one(conn, "SELECT COUNT(*) as n FROM notification_queue WHERE sent_at!=''")["n"]
+                recent = rows(conn, "SELECT * FROM notification_queue ORDER BY created_at DESC LIMIT 5")
+            self.json_response({"ok": True, "pending": pending, "sent": sent, "recent": recent})
+            return
+        if parsed.path == "/api/gsc/summary":
+            client = parse_qs(parsed.query).get("client", ["all"])[0]
+            with connect() as conn:
+                query = """
+                    SELECT client_id, query, page, SUM(clicks) as clicks, SUM(impressions) as impressions,
+                           AVG(ctr) as ctr, AVG(position) as position
+                    FROM gsc_performance
+                """
+                params = []
+                if client != "all":
+                    query += " WHERE client_id=?"
+                    params.append(client)
+                query += " GROUP BY client_id, query, page ORDER BY impressions DESC LIMIT 100"
+                rows_data = rows(conn, query, tuple(params))
+                total_queries = one(conn, "SELECT COUNT(DISTINCT query) as n FROM gsc_performance")
+                total_clicks = one(conn, "SELECT COALESCE(SUM(clicks),0) as n FROM gsc_performance")
+                total_impressions = one(conn, "SELECT COALESCE(SUM(impressions),0) as n FROM gsc_performance")
+            self.json_response({
+                "ok": True,
+                "queries": total_queries["n"] if total_queries else 0,
+                "clicks": total_clicks["n"] if total_clicks else 0,
+                "impressions": total_impressions["n"] if total_impressions else 0,
+                "rows": rows_data
+            })
+            return
         return super().do_GET()
 
     def do_POST(self):
         parsed = urlparse(self.path)
         body = self.read_json()
+        if parsed.path == "/api/gsc/pull":
+            # Trigger GSC pull (runs synchronously for small datasets)
+            try:
+                import subprocess
+                result = subprocess.run(
+                    [sys.executable, "scripts/gsc_data_pull.py", "--days", "28"],
+                    capture_output=True, text=True, cwd=str(ROOT), timeout=120
+                )
+                self.json_response({
+                    "ok": result.returncode == 0,
+                    "stdout": result.stdout.strip(),
+                    "stderr": result.stderr.strip()
+                })
+            except Exception as e:
+                self.json_response({"ok": False, "error": str(e)}, 500)
+            return
         if parsed.path.startswith("/api/approvals/") and parsed.path.endswith("/decision"):
             approval_id = parsed.path.split("/")[3]
             decision = body.get("decision", "").strip()
@@ -359,6 +595,20 @@ class Handler(SimpleHTTPRequestHandler):
                     "SEO OS watcher can create/update the bounded agent task." if decision == "approved" else "Agent will wait for the next human instruction.",
                     appr["source_url"], t,
                 ))
+                # Auto-notify Discord thread
+                emoji_map = {"approved": "✅", "rejected": "❌", "needs_review": "📋", "needs_changes": "🔄"}
+                emoji = emoji_map.get(decision, "📣")
+                decision_label = decision.replace("_", " ").title()
+                notify_msg = (
+                    f"{emoji} **Approval {decision_label}**\n"
+                    f"**{appr['title']}**\n"
+                    f"Client: {appr['client_id']}\n"
+                )
+                if appr.get("source_url"):
+                    notify_msg += f"Page: {appr['source_url']}\n"
+                if note:
+                    notify_msg += f"Note: {note}\n"
+                queue_notification(conn, appr["client_id"], notify_msg)
                 if decision == "approved" and appr["type"] != "policy":
                     existing = one(conn, "SELECT id FROM agent_tasks WHERE page_asset=?", (appr["source_url"],))
                     if not existing:
@@ -375,17 +625,55 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.commit()
                 self.json_response({"ok": True, "summary": summary(conn, "all")})
             return
-        if parsed.path == "/api/refresh":
-            client_id = body.get("client_id", "all")
+        if parsed.path == "/api/notification-queue/mark-sent":
+            nid = body.get("id", "").strip()
+            if not nid:
+                self.json_response({"ok": False, "error": "id required"}, 400)
+                return
             with connect() as conn:
                 t = now()
-                conn.execute("INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)", (
-                    uid("ev"), client_id if client_id != "all" else "all", "dashboard", "data_refresh", "complete",
-                    "Manual dashboard refresh simulated. Real installs should call managed SEO OS data jobs.",
-                    "Review updated opportunities and approvals.", "", t,
-                ))
+                conn.execute("UPDATE notification_queue SET sent_at=? WHERE id=?", (t, nid))
                 conn.commit()
-                self.json_response({"ok": True, "summary": summary(conn, client_id)})
+            self.json_response({"ok": True})
+            return
+        if parsed.path == "/api/refresh":
+            client_id = body.get("client_id", "all")
+            # Run the actual GA4 + GSC pull script
+            import subprocess
+            script = str(ROOT / "scripts" / "ga4_data_pull.py")
+            cmd = ["python3", script, "--days", "28", "--json"]
+            if client_id and client_id != "all":
+                cmd.extend(["--client", client_id])
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                output = result.stdout.strip()
+                try:
+                    pull_data = json.loads(output) if output else []
+                except json.JSONDecodeError:
+                    pull_data = []
+                errors = result.stderr.strip() if result.stderr.strip() else None
+                # Log the pull event
+                with connect() as conn:
+                    t = now()
+                    total_opps = sum(r.get("opportunities_stored", 0) for r in pull_data if "error" not in r)
+                    total_sessions = 0
+                    for r in pull_data:
+                        if "error" not in r and r.get("sessions_data"):
+                            for row in r["sessions_data"]:
+                                total_sessions += int(row.get("sessions", 0) or 0)
+                    summary_text = f"GA4 pull: {total_sessions} sessions, {total_opps} opportunities."
+                    if errors:
+                        summary_text += f" Warnings: {errors[:200]}"
+                    conn.execute("INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)", (
+                        uid("ev"), client_id if client_id != "all" else "all", "ga4_pull", "data_refresh", "complete",
+                        summary_text, "Review updated opportunities and approvals.", "", t,
+                    ))
+                    conn.commit()
+                    self.json_response({"ok": True, "pull_results": pull_data, "summary": summary(conn, client_id)})
+            except subprocess.TimeoutExpired:
+                self.json_response({"ok": False, "error": "GA4 pull timed out (120s)"}, 500)
+            except Exception as e:
+                self.json_response({"ok": False, "error": str(e)}, 500)
             return
         if parsed.path == "/api/discord/notify":
             message = body.get("message", "").strip()
@@ -483,7 +771,229 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.commit()
                 self.json_response({"ok": True, "deleted_client": client_id, "deleted_counts": deleted_counts, "summary": summary(conn, "all")})
             return
+        # ─── Create Client ───────────────────────────────────────────────────
+        m = re.match(r"^/api/clients/([^/]+)/create$", parsed.path)
+        if m:
+            client_id = m.group(1)
+            data = body
+            name = (data.get("name") or "").strip()
+            domain = (data.get("domain") or "").strip()
+            role = (data.get("role") or "").strip() or "SEO client"
+            client_type = (data.get("client_type") or "local").strip()
+            if not name or not domain:
+                self.json_response({"ok": False, "error": "name and domain are required"}, 400)
+                return
+            if client_id in ("", "all"):
+                self.json_response({"ok": False, "error": "Invalid client id"}, 400)
+                return
+            t = now()
+            slug = data.get("hermes_profile") or f"{client_id}-seo"
+            workspace = f"/opt/seo-os/workspaces/{client_id}"
+            with connect() as conn:
+                existing = one(conn, "SELECT id FROM clients WHERE id=?", (client_id,))
+                if existing:
+                    self.json_response({"ok": False, "error": "Client already exists"}, 409)
+                    return
+                conn.execute(
+                    """INSERT INTO clients (id, name, domain, role, status, health_score,
+                       hermes_profile, channel_target, discord_thread_id,
+                       gsc_status, ga4_status, repo_status, zernio_status, client_type,
+                       workspace, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (client_id, name, domain, role, "setup", 50, slug,
+                     "not_bound", "", "not_connected", "not_connected", "not_connected",
+                     "not_connected", client_type, workspace, t, t)
+                )
+                conn.execute(
+                    "INSERT INTO activity_events VALUES (?,?,?,?,?,?,?,?,?)",
+                    (uid("ev"), client_id, "dashboard", "client_created", "complete",
+                     f"Client added: {name}", "Connect GSC, GA4, and review source to begin.", "", t)
+                )
+                conn.commit()
+            self.json_response({"ok": True, "client_id": client_id, "summary": summary(conn, "all")})
+            return
+        if parsed.path == "/api/gbp/health":
+            client_id = body.get("client_id", "")
+            demo = body.get("demo", True)
+            from gbp_monitor import init_gbp, get_latest_gbp_metrics, get_gbp_trend, run_gbp_monitor, calculate_gbp_health_score
+            init_gbp()
+            if demo:
+                run_gbp_monitor(demo=True)
+            metrics = get_latest_gbp_metrics(conn, client_id) if client_id else None
+            trend = get_gbp_trend(conn, client_id) if client_id else []
+            score = calculate_gbp_health_score(metrics) if metrics else 0
+            self.json_response({
+                "ok": True,
+                "metrics": metrics,
+                "trend": trend,
+                "score": score,
+                "summary": summary(conn, "all")
+            })
+            return
         self.json_response({"ok": False, "error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+
+def calculate_client_health(conn: sqlite3.Connection, client_id: str) -> dict:
+    """Calculate a 0-100 health score for a client based on multiple signals.
+
+    Returns dict with score, status (green/yellow/red), and component breakdown.
+    """
+    import json
+
+    # 1. Traffic trend (30%) — compare last two metrics_snapshots
+    snapshots = conn.execute(
+        """SELECT * FROM metrics_snapshots
+        WHERE client_id=? ORDER BY created_at DESC LIMIT 2""",
+        (client_id,)
+    ).fetchall()
+    traffic_score = 50  # neutral default
+    if len(snapshots) >= 2:
+        curr = dict(snapshots[0])
+        prev = dict(snapshots[1])
+        if prev["clicks"] > 0:
+            change = (curr["clicks"] - prev["clicks"]) / prev["clicks"]
+            traffic_score = max(0, min(100, 50 + int(change * 100)))
+
+    # 2. Position improvement (25%) — lower avg_position is better
+    gsc_pos = conn.execute(
+        "SELECT AVG(position) as avg_pos FROM gsc_performance WHERE client_id=?",
+        (client_id,)
+    ).fetchone()
+    position_score = 50  # neutral default
+    if gsc_pos and gsc_pos["avg_pos"]:
+        avg_pos = gsc_pos["avg_pos"]
+        # Score: position 1 = 100, position 50 = 0
+        position_score = max(0, min(100, int(100 - (avg_pos - 1) * 2)))
+
+    # 3. Content velocity (20%) — number of distinct pages ranking
+    pages_row = conn.execute(
+        "SELECT COUNT(DISTINCT page) as n FROM gsc_performance WHERE client_id=?",
+        (client_id,)
+    ).fetchone()
+    pages_ranking = pages_row["n"] if pages_row else 0
+    # 30+ pages = 100, 0 pages = 0
+    content_score = min(100, int(pages_ranking * 3.3))
+
+    # 4. Opportunity signal (25%) — ratio of high-priority opps
+    total_opps = conn.execute(
+        "SELECT COUNT(*) as n FROM opportunities WHERE client_id=?",
+        (client_id,)
+    ).fetchone()["n"]
+    high_opps = conn.execute(
+        "SELECT COUNT(*) as n FROM opportunities WHERE client_id=? AND priority='high'",
+        (client_id,)
+    ).fetchone()["n"]
+    if total_opps > 0:
+        # More high-priority opps = more room for improvement = lower score
+        # But also having opps means we're detecting things. Balance:
+        # 0% high = 70 (stable), 10-20% = 50 (needs work), >30% = 30 (urgent)
+        high_ratio = high_opps / total_opps
+        if high_ratio == 0:
+            signal_score = 80  # No high-priority issues = healthy
+        elif high_ratio <= 0.1:
+            signal_score = 60
+        elif high_ratio <= 0.25:
+            signal_score = 40
+        else:
+            signal_score = 20
+    else:
+        signal_score = 50  # no data
+
+    # Weighted composite
+    score = int(
+        traffic_score * 0.30 +
+        position_score * 0.25 +
+        content_score * 0.20 +
+        signal_score * 0.25
+    )
+    score = max(0, min(100, score))
+
+    # Status
+    if score >= 70:
+        status = "green"
+    elif score >= 40:
+        status = "yellow"
+    else:
+        status = "red"
+
+    return {
+        "client_id": client_id,
+        "score": score,
+        "status": status,
+        "components": {
+            "traffic_trend": traffic_score,
+            "avg_position": position_score,
+            "content_velocity": content_score,
+            "opportunity_signal": signal_score,
+        },
+        "pages_ranking": pages_ranking,
+        "high_priority_opps": high_opps,
+        "total_opportunities": total_opps,
+    }
+
+
+def store_health_score(conn: sqlite3.Connection, health: dict) -> None:
+    """Store or update client health score."""
+    import uuid
+    t = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+    existing = conn.execute(
+        "SELECT id FROM client_health WHERE client_id=?",
+        (health["client_id"],)
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            """UPDATE client_health SET
+                score=?, status=?, components_json=?,
+                pages_ranking=?, high_priority_opps=?, total_opportunities=?, updated_at=?
+            WHERE client_id=?""",
+            (health["score"], health["status"], json.dumps(health["components"]),
+             health["pages_ranking"], health["high_priority_opps"],
+             health["total_opportunities"], t, health["client_id"])
+        )
+    else:
+        hid = f"health_{uuid.uuid4().hex[:10]}"
+        conn.execute(
+            "INSERT INTO client_health VALUES (?,?,?,?,?,?,?,?,?)",
+            (hid, health["client_id"], health["score"], health["status"],
+             json.dumps(health["components"]), health["pages_ranking"],
+             health["high_priority_opps"], health["total_opportunities"], t)
+        )
+    conn.commit()
+
+
+def refresh_ga4_token() -> bool:
+    """Refresh the GA4 OAuth token on startup if refresh_token is available. Returns True if token is valid."""
+    try:
+        token_path = Path("/root/.hermes/google_token.json")
+        if not token_path.exists():
+            return False
+        with open(token_path) as f:
+            token = json.load(f)
+        if "refresh_token" not in token:
+            return True  # token exists but can't refresh; assume valid
+        import urllib.parse as _up
+        data = _up.urlencode({
+            "client_id": token["client_id"],
+            "client_secret": token["client_secret"],
+            "refresh_token": token["refresh_token"],
+            "grant_type": "refresh_token",
+        }).encode()
+        req = urllib.request.Request(
+            "https://oauth2.googleapis.com/token", data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST"
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        result = json.loads(resp.read())
+        token["token"] = result["access_token"]
+        with open(token_path, "w") as f:
+            json.dump(token, f)
+        print("  ✓ GA4 token refreshed on startup")
+        return True
+    except Exception as e:
+        print(f"  ⚠ Token refresh failed: {e}", file=sys.stderr)
+        return False
 
 
 def main() -> None:
@@ -495,11 +1005,38 @@ def main() -> None:
     if args.reset and DB_PATH.exists():
         DB_PATH.unlink()
     init_db(seed=True)
+    refresh_ga4_token()
+    # Start background notifier thread
+    import threading as _threading
+    _notifier = _threading.Thread(target=notifier_loop, daemon=True)
+    _notifier.start()
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"SEO OS dashboard running at http://{args.host}:{args.port}")
     print(f"SQLite: {DB_PATH}")
+    print(f"Notifier: background notification thread started")
     httpd.serve_forever()
 
 
+# Register prospecting module routes (plugin)
+try:
+    import prospects as _prospects
+    _prospects.register_routes(Handler)
+except (ImportError, AttributeError):
+    pass
+
+
+# Register prospecting module routes (plugin)
+try:
+    import prospects as _prospects
+    _prospects.register_routes(Handler)
+except (ImportError, AttributeError):
+    pass
+
+
 if __name__ == "__main__":
+    try:
+        import prospects
+        prospects.init_prospects()
+    except ImportError:
+        pass
     main()

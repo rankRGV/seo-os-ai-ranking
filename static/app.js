@@ -1,11 +1,13 @@
 const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
-  ['Agent Tasks','list'], ['Content','edit'], ['Schedule','calendar'], ['CTR Tests','target'], ['Activity Log','pulse'], ['Reports','file'], ['Settings','settings']
+  ['Content Briefs','edit'], ['Prospects','target'], ['Agent Tasks','list'], ['Content','edit'], ['Schedule','calendar'], ['CTR Tests','target'], ['Activity Log','pulse'], ['Reports','file'], ['Settings','settings']
 ];
-let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null };
+let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null };
 
 const $ = sel => document.querySelector(sel);
-const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function safePath(url){ try { return new URL(url||'https://x').pathname } catch(e) { return url||''; } }
+function safeHost(url){ try { return new URL(url||'https://x').hostname } catch(e) { return ''; } }
 const fmt = n => Number(n || 0).toLocaleString();
 const pct = n => `${Number(n || 0).toFixed(Math.abs(n) < 1 && n !== 0 ? 2 : 1)}%`;
 const one = n => Number(n || 0).toFixed(1).replace(/\.0$/,'');
@@ -35,7 +37,7 @@ function clientName(id){
   const c = state.data?.clients.find(x => x.id === id);
   return c ? c.name : id;
 }
-function clientDot(id){ return id === 'demo-local' ? 'green' : id === 'demo-saas' ? 'blue' : id === 'setup-client' ? 'amber' : 'muted'; }
+function clientDot(id){ return 'muted'; }
 function clientScoped(rows){
   if(state.client === 'all') return rows || [];
   return (rows || []).filter(row => row.client_id === state.client);
@@ -57,7 +59,7 @@ async function api(path, opts={}){
 }
 async function load(client=state.client){
   state.client = client;
-  state.data = await api(`/api/summary?client=${encodeURIComponent(client)}`);
+  state.data = await api(`/api/summary?client=${encodeURIComponent(client)}&days=${state.oppDays}`);
   render();
 }
 
@@ -117,27 +119,55 @@ function commandCenter(){
     ${kpi('System health', k.system_health, 'no failed jobs', 'pulse', k.system_health==='OK'?'green':'red')}
   </div>`;
   const needs = d.approvals.filter(a => ['needs_review','needs_changes'].includes(a.status)).slice(0,5).map(a => `<tr><td>${esc(clientName(a.client_id))}</td><td><strong>${esc(a.title)}</strong><div class="muted">${esc(a.requested_action)}</div></td><td><span class="tag purple">${label(a.type)}</span></td><td><span class="tag ${classForStatus(a.risk)}">${label(a.risk)}</span></td><td>${esc(a.evidence.slice(0,120))}...</td><td><button class="btn primary" data-open-approvals>Review</button></td></tr>`);
-  const oppRows = d.opportunities.slice(0,6).map(o => `<tr><td>${esc(clientName(o.client_id))}</td><td><strong>${esc(new URL(o.page).pathname)}</strong><div class="url">${esc(o.page)}</div></td><td>${esc(o.problem)}</td><td><span class="tag ${classForStatus(o.priority)}">${label(o.priority)}</span></td><td>${fmt(o.impressions)}</td><td>${fmt(o.clicks)}</td><td>${pct(o.ctr)}</td><td>${Number(o.position).toFixed(1)}</td></tr>`);
+  const oppRows = d.opportunities.slice(0,6).map(o => `<tr><td>${esc(clientName(o.client_id))}</td><td><strong>${esc(safePath(o.page))}</strong><div class="url">${esc(o.page)}</div></td><td>${esc(o.problem)}</td><td><span class="tag ${classForStatus(o.priority)}">${label(o.priority)}</span></td><td>${fmt(o.impressions)}</td><td>${fmt(o.clicks)}</td><td>${pct(o.ctr)}</td><td>${Number(o.position).toFixed(1)}</td></tr>`);
   const healthRows = d.visible_clients.map(c => {
     const approvals = d.approvals.filter(a => a.client_id === c.id && a.status === 'needs_review').length;
     const tasks = d.tasks.filter(t => t.client_id === c.id && !['done','cancelled'].includes(t.status)).length;
     const opps = d.opportunities.filter(o => o.client_id === c.id).length;
-    return `<tr><td><strong>${esc(c.name)}</strong><div class="muted">${esc(c.domain)}</div></td><td><span class="tag ${classForStatus(c.status)}">${c.health_score}% · ${label(c.status)}</span></td><td>${approvals}</td><td>${tasks}</td><td>${d.jobs.filter(j=>j.client_id===c.id).length}</td><td>${opps}</td><td>${esc(c.gsc_status)} / ${esc(c.ga4_status)}</td><td>${c.status==='setup'?'Connect GSC, GA4, review source':'Review top opportunity'}</td></tr>`;
+    return `<tr><td><strong>${esc(c.name)}</strong><div class="muted">${esc(c.domain)}</div></td><td><span class="tag ${classForStatus(c.status)}">${c.health_score}% · ${label(c.status)}</span></td><td>${approvals}</td><td>${tasks}</td><td>${d.jobs.filter(j=>j.client_id===c.id).length}</td><td>${opps}</td><td>${esc(c.gsc_status)} / ${esc(c.ga4_status)}</td><td>${c.status==='setup'?'Connect GSC, GA4, review source':'<button class="link-action" data-client="${c.id}" data-section="Opportunities" style="font-size:12px;padding:0">Review top opportunity →</button>'}</td></tr>`;
   });
-  const perf = `<div class="two-col">${d.metrics.map(m => `<div class="card perf-card"><h3><span class="dot ${clientDot(m.client_id)}"></span>${esc(clientName(m.client_id))}</h3><div class="perf-grid"><div class="perf-metric"><span>Clicks</span><strong>${fmt(m.clicks)}</strong><em class="delta ${m.clicks_delta>=0?'good':'bad'}">${m.clicks_delta>=0?'+':''}${fmt(m.clicks_delta)}</em></div><div class="perf-metric"><span>Impressions</span><strong>${fmt(m.impressions)}</strong><em class="delta ${m.impressions_delta>=0?'good':'bad'}">${m.impressions_delta>=0?'+':''}${fmt(m.impressions_delta)}</em></div><div class="perf-metric"><span>CTR</span><strong>${pct(m.ctr)}</strong><em class="delta ${m.ctr_delta>=0?'good':'bad'}">${m.ctr_delta>=0?'+':''}${one(m.ctr_delta)} pts</em></div><div class="perf-metric"><span>Avg rank</span><strong>${Number(m.avg_rank).toFixed(1)}</strong><em class="delta ${m.avg_rank_delta<=0?'good':'bad'}">${one(Math.abs(m.avg_rank_delta))} ${m.avg_rank_delta<=0?'better':'worse'}</em></div></div></div>`).join('')}</div>`;
+  const perf = `<div class="two-col">${d.metrics.map(m => `<div class="card perf-card"><h3><span class="dot ${clientDot(m.client_id)}"></span>${esc(clientName(m.client_id))}</h3><div class="perf-source"><span class="source-badge gsc">GSC</span></div><div class="perf-grid"><div class="perf-metric"><span>Clicks</span><strong>${fmt(m.clicks)}</strong><em class="delta ${m.clicks_delta>=0?'good':'bad'}">${m.clicks_delta>=0?'+':''}${fmt(m.clicks_delta)}</em></div><div class="perf-metric"><span>Impressions</span><strong>${fmt(m.impressions)}</strong><em class="delta ${m.impressions_delta>=0?'good':'bad'}">${m.impressions_delta>=0?'+':''}${fmt(m.impressions_delta)}</em></div><div class="perf-metric"><span>CTR</span><strong>${pct(m.ctr)}</strong><em class="delta ${m.ctr_delta>=0?'good':'bad'}">${m.ctr_delta>=0?'+':''}${one(m.ctr_delta)} pts</em></div><div class="perf-metric"><span>Avg rank</span><strong>${Number(m.avg_rank).toFixed(1)}</strong><em class="delta ${m.avg_rank_delta<=0?'good':'bad'}">${one(Math.abs(m.avg_rank_delta))} ${m.avg_rank_delta<=0?'better':'worse'}</em></div></div></div>`).join('')}</div>`;
   const activities = d.events.slice(0,7).map(e => `<tr><td>${new Date(e.created_at).toLocaleString()}</td><td>${esc(clientName(e.client_id))}</td><td><span class="tag blue">${label(e.source)}</span></td><td>${label(e.event_type)}</td><td>${esc(e.summary)}</td><td>${esc(e.next_action)}</td></tr>`);
+  const healthBars = (d.client_health || []).map(h => {
+    const score = h.score || 50;
+    const status = h.status || 'yellow';
+    const color = status === 'green' ? '#16a34a' : status === 'yellow' ? '#ca8a04' : '#dc2626';
+    const pages = h.pages_ranking || 0;
+    const highOpps = h.high_priority_opps || 0;
+    return `<div class="health-row"><span class="health-name"><span class="dot ${clientDot(h.client_id)}"></span>${esc(clientName(h.client_id))}</span><div class="health-bar-bg"><div class="health-bar-fill" style="width:${score}%;background:${color}"></div></div><span class="health-score" style="color:${color}">${score}</span><span class="health-detail">${pages} pages · ${highOpps} high</span></div>`;
+  }).join('');
+  const healthWidget = `<div class="health-grid">${healthBars || '<div class="muted" style="font-size:13px">No health data yet. Run a data pull first.</div>'}</div>`;
+
+  // GBP Health widget (local clients only)
+  const gbpData = d.gbp_health || [];
+  const gbpWidget = gbpData.length > 0 ? `<div class="gbp-health-grid">${gbpData.map(g => `
+    <div class="gbp-card ${g.status}">
+      <div class="gbp-header"><strong>${esc(g.name)}</strong><span class="tag ${g.status==='green'?'green':g.status==='yellow'?'amber':'red'}">${g.score}/100</span></div>
+      <div class="gbp-metrics">
+        <span>👁 ${g.views}</span>
+        <span>📞 ${g.calls}</span>
+        <span>🌐 ${g.website}</span>
+        <span>🗺 ${g.directions}</span>
+      </div>
+      <div class="gbp-reviews">⭐ ${g.review_avg} (${g.review_count} reviews)</div>
+    </div>
+  `).join('')}</div>` : '<div class="muted" style="font-size:13px">No GBP data. Add GBP credentials or run demo check.</div>';
+
   const body = `<div class="architecture"><span class="arch-pill blue">Discord</span><span class="arrow">→</span><span class="arch-pill green">Dashboard</span><span class="arrow">→</span><span class="arch-pill purple">Hermes Agents</span><span class="arrow">→</span><span class="arch-pill" style="background:#0f172a;color:#fff">Reports</span></div>${kpis}
+    ${section('Client Health','Overall SEO health per client — green thriving, yellow needs attention, red at-risk','activity','purple',undefined, healthWidget)}
+    ${section('Google Business Profile','Local business health — views, actions, reviews for local clients','building','green',undefined, gbpWidget)}
     ${section('Needs Your Attention Today','Decisions and approvals the agents are waiting on','alert','red',`${needs.length} items`, simpleTable(['Client','Item','Type','Priority','Why it matters','Action'], needs))}
-    <h2>28-Day Performance <span class="muted" style="font-size:13px;font-weight:500">GSC-style snapshot · fake template data</span></h2>${perf}
+    <h2>28-Day Performance <span class="muted" style="font-size:13px;font-weight:500">GSC clicks and impressions</span></h2>${perf}
     ${section('High-Impact SEO Opportunities','High impressions, weak clicks — ranked by impressions','trend','green',undefined, simpleTable(['Client','Page','Problem','Priority','Impr.','Clicks','CTR','Pos.'], oppRows), '<button class="link-action" data-open-opps>View all →</button>')}
     ${section('Client Health Summary','Workload and next action per site','building','blue',undefined, simpleTable(['Client','Status','Appr.','Tasks','Jobs','Opps','Connections','Recommended next action'], healthRows))}
     ${commandPreviews(d)}
     ${section('Agent Activity','Important outcomes only — not a Discord transcript','pulse','mutedIcon',undefined, simpleTable(['Time','Client','Source','Type','What happened','Next action'], activities))}
-    ${section('Quick Actions','Send updates to Discord, trigger data refresh, and manage notifications','settings','blue',undefined, '<button class="btn primary" id="notifyDiscordBtn">Send to Discord</button> <button class="btn" id="createThreadBtn">Create Client Thread</button> <span class="muted" style="font-size:12px">Sends notifications and creates per-client threads in Discord</span>')}`;
+    ${section('Quick Actions','Send updates to Discord, trigger data refresh, and manage notifications','settings','blue',undefined, '<button class="btn primary" id="notifyDiscordBtn">Send to Discord</button> <button class="btn" id="createThreadBtn">Create Client Thread</button> <button class="btn" id="ga4PullBtn">Pull GA4 Now</button> <button class="btn" id="gscPullBtn">Pull GSC Now</button> <span class="muted" style="font-size:12px">Last GA4 pull: <span id="lastGa4Pull">—</span> · Last GSC pull: <span id="lastGscPull">—</span></span>')}`;
   setTimeout(()=>document.querySelectorAll('[data-open-approvals]').forEach(b=>b.onclick=()=>{state.section='Approvals';render()}),0);
   setTimeout(()=>document.querySelectorAll('[data-open-opps]').forEach(b=>b.onclick=()=>{state.section='Opportunities';render()}),0);
+  setTimeout(()=>document.querySelectorAll('[data-section="Opportunities"]').forEach(b=>b.onclick=()=>{if(b.dataset.client){load(b.dataset.client)}else{state.section='Opportunities';render()}}),0);
   setTimeout(()=>document.querySelectorAll('[data-open-schedule]').forEach(b=>b.onclick=()=>{state.section='Schedule';render()}),0);
-  return page('SEO OS Command Center','AI agents, SEO data, approvals, schedules, and client work in one operating layer.', body);
+  return page('SEO Command Center','AI agents, SEO data, approvals, schedules, and client work in one operating layer.', body);
 }
 
 function commandPreviews(d){
@@ -172,13 +202,56 @@ async function decide(id, decision){
 }
 
 function opportunitiesView(){
-  const filters = ['All','Low CTR','SERP gap','Content refresh'];
+  const filters = ['All','High','Medium','Low','Low CTR','SERP gap','Content refresh'];
+  const dayRanges = [{label:'All time',days:0},{label:'7 days',days:7},{label:'28 days',days:28},{label:'90 days',days:90}];
   let opps = state.data.opportunities;
-  if(state.oppFilter !== 'All') opps = opps.filter(o => o.opportunity_type === state.oppFilter);
+  if(state.oppFilter === 'High') opps = opps.filter(o => o.priority === 'high');
+  else if(state.oppFilter === 'Medium') opps = opps.filter(o => o.priority === 'medium');
+  else if(state.oppFilter === 'Low') opps = opps.filter(o => o.priority === 'low');
+  else if(state.oppFilter !== 'All') opps = opps.filter(o => o.opportunity_type === state.oppFilter);
   const chips = `<div class="opp-chips">${filters.map(f=>`<button class="opp-chip ${state.oppFilter===f?'active':''}" data-opp-filter="${f}">${f}</button>`).join('')}</div>`;
-  const rows = opps.map((o,i) => `<tr><td class="rank-cell">${i+1}</td><td><span class="client-cell"><span class="dot ${clientDot(o.client_id)}"></span>${esc(clientName(o.client_id))}</span></td><td class="mono opp-page">${esc(new URL(o.page).pathname)}</td><td class="muted">${esc(o.problem)}</td><td><span class="tag ${classForStatus(o.priority)}">${label(o.priority)}</span></td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(o.impressions)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(o.clicks)}</td><td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${pct(o.ctr)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${Number(o.position).toFixed(1)}</td><td class="muted" style="max-width:240px">${esc(o.recommended_workflow)}</td><td><span class="tag ${classForStatus(o.status)}">${label(o.status)}</span></td></tr>`);
-  setTimeout(()=>document.querySelectorAll('[data-opp-filter]').forEach(b=>b.onclick=()=>{state.oppFilter=b.dataset.oppFilter;render()}),0);
-  return `<div class="opp-title"><h1>SEO Opportunities</h1><p>The opportunity pipeline from Search Console — pages with high impressions but weak clicks, CTR, or ranking position.</p></div>${chips}<div class="card section-card"><div class="table-wrap"><table><thead><tr><th style="text-align:center">#</th><th>Client</th><th>Page</th><th>Problem</th><th>Priority</th><th style="text-align:right">Impr.</th><th style="text-align:right">Clicks</th><th style="text-align:right">CTR</th><th style="text-align:right">Pos.</th><th>Recommended workflow</th><th>Status</th></tr></thead><tbody>${rows.join('') || `<tr><td colspan="11" class="empty">No opportunities for this filter.</td></tr>`}</tbody></table></div></div>`;
+  const dayChips = `<div class="opp-chips" style="margin-top:6px">${dayRanges.map(r=>`<button class="opp-chip ${state.oppDays===r.days?'active':''}" data-opp-days="${r.days}">${r.label}</button>`).join('')}</div>`;
+  const rows = opps.map((o,i) => {
+    const trendIcon = o.trend_direction === '↑' ? '↑' : o.trend_direction === '↓' ? '↓' : '→';
+    const trendClass = o.trend === 'clicks_up' ? 'good' : o.trend === 'clicks_down' ? 'bad' : 'muted';
+    const baselineNote = o.baseline_clicks ? ` (was ${o.baseline_clicks})` : '';
+    let sourceBadge = '';
+    try {
+      const ev = JSON.parse(o.evidence_json || '{}');
+      if (ev.source === 'gsc_pull') sourceBadge = '<span class="tag green" style="margin-left:4px;font-size:10px;padding:2px 6px">GSC</span>';
+      else if (ev.source === 'ga4_pull') sourceBadge = '<span class="tag blue" style="margin-left:4px;font-size:10px;padding:2px 6px">GA4</span>';
+    } catch(e) {}
+    return `<tr><td class="rank-cell">${i+1}</td><td><span class="client-cell"><span class="dot ${clientDot(o.client_id)}"></span>${esc(clientName(o.client_id))}</span></td><td class="mono opp-page">${esc(safePath(o.page))}</td><td class="muted">${esc(o.problem)}${baselineNote}${sourceBadge}</td><td><span class="tag ${classForStatus(o.priority)}">${label(o.priority)}</span></td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(o.impressions)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(o.clicks)}</td><td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${pct(o.ctr)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${Number(o.position).toFixed(1)}</td><td class="muted" style="max-width:240px">${esc(o.recommended_workflow)}</td><td><span class="tag ${classForStatus(o.status)}">${label(o.status)}</span></td><td style="text-align:center;font-weight:800;color:${trendClass==='good'?'#166337':trendClass==='bad'?'#C0392B':'#7E8C8A'}">${trendIcon}</td></tr>`;
+  });
+  setTimeout(()=>{
+    document.querySelectorAll('[data-opp-filter]').forEach(b=>b.onclick=()=>{state.oppFilter=b.dataset.oppFilter;render()});
+    document.querySelectorAll('[data-opp-days]').forEach(b=>b.onclick=()=>{state.oppDays=parseInt(b.dataset.oppDays)||0;render()});
+  },0);
+  return `<div class="opp-title"><h1>SEO Opportunities</h1><p>The opportunity pipeline from Search Console — pages with high impressions but weak clicks, CTR, or ranking position.</p></div>${chips}${dayChips}<div class="card section-card"><div class="table-wrap"><table><thead><tr><th style="text-align:center">#</th><th>Client</th><th>Page</th><th>Problem</th><th>Priority</th><th style="text-align:right">Impr.</th><th style="text-align:right">Clicks</th><th style="text-align:right">CTR</th><th style="text-align:right">Pos.</th><th>Recommended workflow</th><th>Status</th><th style="text-align:center">Trend</th></tr></thead><tbody>${rows.join('') || `<tr><td colspan="12" class="empty">No opportunities for this filter.</td></tr>`}</tbody></table></div></div>`;
+}
+function contentBriefsView(){
+  const d = state.data;
+  const briefs = d.content_briefs || [];
+  const filters = ['All','High','Medium','Low'];
+  let filtered = briefs;
+  if(state.briefFilter === 'High') filtered = filtered.filter(b => b.priority === 'high');
+  else if(state.briefFilter === 'Medium') filtered = filtered.filter(b => b.priority === 'medium');
+  else if(state.briefFilter === 'Low') filtered = filtered.filter(b => b.priority === 'low');
+  const chips = `<div class="opp-chips">${filters.map(f=>`<button class="opp-chip ${state.briefFilter===f?'active':''}" data-brief-filter="${f}">${f}</button>`).join('')}</div>`;
+  const rows = filtered.map((b,i) => {
+    const icon = b.priority === 'high' ? '🔴' : b.priority === 'medium' ? '🟡' : '⚪';
+    return `<tr><td class="rank-cell">${i+1}</td><td><span class="client-cell"><span class="dot ${clientDot(b.client_id)}"></span>${esc(clientName(b.client_id))}</span></td><td class="muted" style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.query)}">${esc(b.query)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${b.avg_position ? Number(b.avg_position).toFixed(1) : '—'}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(b.impressions)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${pct(b.avg_ctr)}</td><td class="muted" style="font-size:12px;max-width:280px">${esc(b.brief)}</td><td class="mono" style="font-size:12px;color:#1D4ED8;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(b.suggested_title)}">${esc(b.suggested_title)}</td></tr>`;
+  });
+  setTimeout(()=>document.querySelectorAll('[data-brief-filter]').forEach(b=>b.onclick=()=>{state.briefFilter=b.dataset.briefFilter;render()}),0);
+  return page('Content Briefs','Auto-generated content opportunities from GSC search data — keywords with traction but weak signals.', section('Content Opportunities','Keywords ranking 4-20 with decent impressions but weak CTR — ready for content creation or optimization.','edit','purple',`${briefs.length} briefs`, simpleTable(['#','Client','Query','Pos.','Impr.','CTR','Opportunity','Suggested Title'], rows), '<button class="btn" id="refreshBriefsBtn">Refresh Briefs</button>'));
+}
+function gscView(){
+  const d = state.data;
+  const gsc = d.gsc || [];
+  const total = d.gsc_total || {queries:0, clicks:0, impressions:0};
+  const stats = `<div class="stat-row"><span><b>${total.queries}</b> queries tracked</span><span><b>${total.clicks}</b> total clicks</span><span><b>${total.impressions}</b> impressions</span><span><b>${strictClientLabel()}</b></span></div>`;
+  const rows = gsc.map((r,i) => `<tr><td class="rank-cell">${i+1}</td><td><span class="client-cell"><span class="dot ${clientDot(r.client_id)}"></span>${esc(clientName(r.client_id))}</span></td><td class="muted" style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.query)}">${esc(r.query)}</td><td class="mono opp-page" style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.page)}">${esc(safePath(r.page))}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(r.clicks)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(r.impressions)}</td><td style="text-align:right;font-weight:600;font-variant-numeric:tabular-nums">${pct(r.ctr)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${Number(r.position).toFixed(1)}</td></tr>`);
+  return page('GSC Search Keywords','Search queries driving traffic to your site from Google Search Console.', section('Top Keywords by Impressions','Click data from Google — what searches bring visitors to your pages','🔍','green',gsc.length, simpleTable(['#','Client','Query','Page','Clicks','Impressions','CTR','Position'], rows), '<button class="btn" id="gscPullBtn" style="margin-top:12px">Pull GSC Data Now</button>'));
 }
 function tasksView(){
   const rows = state.data.tasks.map(t => `<tr><td>${esc(clientName(t.client_id))}</td><td><strong>${esc(t.title)}</strong><div class="url">${esc(t.page_asset)}</div></td><td><span class="tag ${classForStatus(t.priority)}">${label(t.priority)}</span></td><td><span class="tag ${classForStatus(t.status)}">${label(t.status)}</span></td><td>${esc(t.owner_profile)}</td><td>${esc(t.source)}</td><td>${esc(t.next_action)}</td></tr>`);
@@ -196,13 +269,13 @@ function contentView(){
   const activeCount = contentOpps.length;
   const gatedCount = contentOpps.filter(o => ['needs_approval','task_created'].includes(o.status)).length;
   const stats = `<div class="stat-row"><span><b>${activeCount}</b> active content items</span><span><b>${gatedCount}</b> approval-gated</span><span><b>${strictClientLabel()}</b></span><span><b>0</b> auto-publish actions</span></div>`;
-  const board = `<div class="kanban-board">${stages.map(stage => `<div class="kanban-col"><div class="kanban-head"><span class="dot ${colors[stage]}"></span><strong>${stage}</strong><span>${byStage[stage].length}</span></div>${byStage[stage].map(o => `<div class="kanban-card"><span class="tag ${colors[stage]==='muted'?'blue':colors[stage]}">${label(o.opportunity_type)}</span><h3>${esc(new URL(o.page).pathname)}</h3><p>${esc(o.recommended_workflow)}</p><div class="kanban-meta"><span class="dot ${clientDot(o.client_id)}"></span>${esc(clientName(o.client_id))}<small>Approval-gated</small></div></div>`).join('') || '<div class="empty">No client items.</div>'}</div>`).join('')}</div>`;
-  const rows = contentOpps.map(o => `<tr><td>${esc(clientName(o.client_id))}</td><td><strong>${esc(new URL(o.page).pathname)}</strong><div class="url">${esc(o.page)}</div></td><td>${label(o.opportunity_type)}</td><td><span class="tag ${classForStatus(o.priority)}">${label(o.priority)}</span></td><td>${esc(o.recommended_workflow)}</td><td><span class="tag amber">Needs approval before publish</span></td></tr>`);
+  const board = `<div class="kanban-board">${stages.map(stage => `<div class="kanban-col"><div class="kanban-head"><span class="dot ${colors[stage]}"></span><strong>${stage}</strong><span>${byStage[stage].length}</span></div>${byStage[stage].map(o => `<div class="kanban-card"><span class="tag ${colors[stage]==='muted'?'blue':colors[stage]}">${label(o.opportunity_type)}</span><h3>${esc(safePath(o.page))}</h3><p>${esc(o.recommended_workflow)}</p><div class="kanban-meta"><span class="dot ${clientDot(o.client_id)}"></span>${esc(clientName(o.client_id))}<small>Approval-gated</small></div></div>`).join('') || '<div class="empty">No client items.</div>'}</div>`).join('')}</div>`;
+  const rows = contentOpps.map(o => `<tr><td>${esc(clientName(o.client_id))}</td><td><strong>${esc(safePath(o.page))}</strong><div class="url">${esc(o.page)}</div></td><td>${label(o.opportunity_type)}</td><td><span class="tag ${classForStatus(o.priority)}">${label(o.priority)}</span></td><td>${esc(o.recommended_workflow)}</td><td><span class="tag amber">Needs approval before publish</span></td></tr>`);
   return page('Content Pipeline',`Client-scoped content and refresh work for ${strictClientLabel()}. Drafts are approval-gated before any page goes live.`, stats + board + section('Content Opportunities','Refresh existing URLs first. Avoid duplicate or cannibalizing content.','edit','purple',rows.length, simpleTable(['Client','Page','Content work','Priority','Recommended workflow','Gate'], rows)));
 }
 function ctrView(){
   const lowCtrOpps = clientScoped(state.data.opportunities).filter(o => o.opportunity_type === 'Low CTR' || Number(o.ctr || 0) < 2).slice(0, 12);
-  const cards = lowCtrOpps.length ? `<div class="ctr-grid">${lowCtrOpps.map(o=>`<div class="card ctr-card"><div class="approval-top"><span class="tag ${classForStatus(o.status)}">${label(o.status)}</span><span class="tag ${clientDot(o.client_id)}">${esc(clientName(o.client_id))}</span></div><h3>${esc(new URL(o.page).pathname)}</h3><div class="muted">Current CTR: ${pct(o.ctr)} · Avg position ${Number(o.position).toFixed(1)}</div><div class="proposed"><small>Recommended title/meta test workflow</small><p>${esc(o.recommended_workflow)}</p></div><div class="metric-strip"><div><b>${pct(o.ctr)}</b><span>Start CTR</span></div><div><b>${fmt(o.clicks)}</b><span>Clicks</span></div><div><b>${fmt(o.impressions)}</b><span>Impr.</span></div></div><div class="ctr-footer"><span>${esc(o.problem)}</span><button class="btn primary" data-open-approvals>Request approval</button></div></div>`).join('')}</div>` : `<div class="card"><div class="empty">No CTR tests or low-CTR opportunities for ${esc(strictClientLabel())}.</div></div>`;
+  const cards = lowCtrOpps.length ? `<div class="ctr-grid">${lowCtrOpps.map(o=>`<div class="card ctr-card"><div class="approval-top"><span class="tag ${classForStatus(o.status)}">${label(o.status)}</span><span class="tag ${clientDot(o.client_id)}">${esc(clientName(o.client_id))}</span></div><h3>${esc(safePath(o.page))}</h3><div class="muted">Current CTR: ${pct(o.ctr)} · Avg position ${Number(o.position).toFixed(1)}</div><div class="proposed"><small>Recommended title/meta test workflow</small><p>${esc(o.recommended_workflow)}</p></div><div class="metric-strip"><div><b>${pct(o.ctr)}</b><span>Start CTR</span></div><div><b>${fmt(o.clicks)}</b><span>Clicks</span></div><div><b>${fmt(o.impressions)}</b><span>Impr.</span></div></div><div class="ctr-footer"><span>${esc(o.problem)}</span><button class="btn primary" data-open-approvals>Request approval</button></div></div>`).join('')}</div>` : `<div class="card"><div class="empty">No CTR tests or low-CTR opportunities for ${esc(strictClientLabel())}.</div></div>`;
   setTimeout(()=>document.querySelectorAll('[data-open-approvals]').forEach(b=>b.onclick=()=>{state.section='Approvals';render()}),0);
   return page('CTR Tests',`Client-scoped title and meta tests for ${strictClientLabel()}. Hermes suggests a test, the user approves, baseline metrics lock, then SEO OS monitors the winner.`, cards);
 }
@@ -267,7 +340,7 @@ function reportsDetail(){
     ['Conversions', fmt(m.conversions), 'tracked', true]
   ].map(([label,value,delta,good]) => `<div class="snap-metric"><span>${label}</span><b>${value}</b><em class="delta ${good?'good':'bad'}">${delta}</em></div>`).join('');
   const opps = state.data.opportunities.filter(o=>o.client_id===c.id).slice(0,5);
-  const topPages = opps.map(o=>`<tr><td class="mono" style="color:#1D4ED8;font-weight:600">${esc(new URL(o.page).pathname)}</td><td style="text-align:right">${fmt(o.impressions)}</td><td style="text-align:right">${fmt(o.clicks)}</td><td style="text-align:right;font-weight:600">${pct(o.ctr)}</td><td style="text-align:right">${Number(o.position).toFixed(1)}</td></tr>`);
+  const topPages = opps.map(o=>`<tr><td class="mono" style="color:#1D4ED8;font-weight:600">${esc(safePath(o.page))}</td><td style="text-align:right">${fmt(o.impressions)}</td><td style="text-align:right">${fmt(o.clicks)}</td><td style="text-align:right;font-weight:600">${pct(o.ctr)}</td><td style="text-align:right">${Number(o.position).toFixed(1)}</td></tr>`);
   const health = [['Search Console',c.gsc_status],['Analytics',c.ga4_status],['Repository',c.repo_status],['review source',c.zernio_status],['Hermes profile',c.hermes_profile],['Workspace',c.workspace]].map(([k,v])=>`<div class="health-row"><span class="dot ${String(v).includes('connected')?'green':'amber'}"></span><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
   const body = `<button class="back-report" data-back-reports>${icon('list',14)}All reports</button><div class="snapshot-head"><div><h1>${esc(c.name)} — SEO Snapshot</h1><p><span class="mono">${esc(c.domain)}</span> · ${esc(m.period_label || 'Last 28 days')}</p></div><button class="export-report">${icon('file',14)}Export report</button></div><div class="snap-metrics">${metricCards}</div><div class="snapshot-grid"><div class="card chart-card"><div><span>Clicks · last 28 days</span><em class="delta ${m.clicks_delta>=0?'good':'bad'}">${m.clicks_delta>=0?'+':''}${fmt(m.clicks_delta)}</em></div><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="0,78 12,72 25,66 38,70 50,52 62,43 75,39 88,28 100,20" fill="none" stroke="#1F7A43" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></polyline><polyline points="0,100 0,78 12,72 25,66 38,70 50,52 62,43 75,39 88,28 100,20 100,100" fill="#1F7A43" fill-opacity=".1" stroke="none"></polyline></svg></div><div class="card site-health"><div class="report-label" style="margin:0 0 6px">Site health</div>${health}</div></div><div class="card section-card"><div class="report-table-title">Top pages by impressions</div>${simpleTable(['Page','Impressions','Clicks','CTR','Avg position'], topPages)}</div>`;
   setTimeout(()=>document.querySelector('[data-back-reports]')?.addEventListener('click',()=>{state.reportClient=null;render()}),0);
@@ -278,10 +351,35 @@ function reportsView(){
 }
 function settingsView(){
   const s=state.data.settings;
-  const clientRows = state.data.clients.map(c => `<div class="delete-client-row"><div><strong>${esc(c.name)}</strong><span>${esc(c.domain)} · ${esc(c.hermes_profile)}</span></div><button class="btn danger" data-delete-client="${esc(c.id)}">Delete client</button></div>`).join('');
-  const body = `<div class="grid" style="grid-template-columns:1.1fr .9fr"><div class="card settings-card"><h3>Onboarding model</h3><p>For the people we give SEO OS to, setup should be: add the client from Discord, auto-create the dashboard row, per-client Hermes profile, workspace, setup tasks, then connect GSC, GA4, and review source. No manual cron setup.</p><div class="connection-list"><div><span>Scheduler</span><strong>${esc(s.scheduler_mode)}</strong></div><div><span>Model policy</span><strong>Cheap by default</strong></div><div><span>Approval safety</span><strong>State first, production later</strong></div></div></div><div class="card settings-card"><h3>Recommended v1 config</h3><div class="codebox">clients.yaml\n  client_id\n  domain\n  gsc_property\n  ga4_property\n  zernio_account\n  hermes_profile\n  channel_target\n\nseo-os.sqlite\n  approvals\n  opportunities\n  tasks\n  jobs\n  reports\n  activity_events</div></div><div class="card settings-card" style="grid-column:1/-1"><h3>Safe action policy</h3><p>${esc(s.safe_actions)}</p><p><strong>Model policy:</strong> ${esc(s.model_policy)}</p><p><strong>Product setup goal:</strong> ${esc(s.onboarding_goal)}</p></div><div class="card settings-card danger-zone" style="grid-column:1/-1"><h3>Danger zone: delete client</h3><p>Settings-only destructive control. This removes the client and client-scoped prototype rows from SQLite. Production v1 should archive/export first, then require a stronger confirmation.</p><div class="delete-client-list">${clientRows}</div></div></div>`;
-  setTimeout(()=>document.querySelectorAll('[data-delete-client]').forEach(b=>b.onclick=()=>deleteClient(b.dataset.deleteClient)),0);
+  const clientRows = state.data.clients.map(c => `<div class="delete-client-row"><div><strong>${esc(c.name)}</strong><span>${esc(c.domain)} · ${esc(c.hermes_profile)} · ${esc(c.client_type||'local')}</span></div><button class="btn danger" data-delete-client="${esc(c.id)}">Delete client</button></div>`).join('');
+  const body = `<div class="grid" style="grid-template-columns:1.1fr .9fr"><div class="card settings-card"><h3>Add new client</h3><p>Onboard a new client. A Hermes profile, workspace, and dashboard row are created automatically. Then connect GSC + GA4.</p><div style="display:flex;flex-direction:column;gap:8px"><label>Client ID *</label><input class="modal-input" id="acId" placeholder="e.g. edel-roofing" /><label>Business name *</label><input class="modal-input" id="acName" placeholder="e.g. Edel Roofing" /><label>Domain *</label><input class="modal-input" id="acDomain" placeholder="https://edelroofing.com" /><label>Role / niche</label><input class="modal-input" id="acRole" placeholder="e.g. Roofing contractor" /><label>Client type</label><select class="modal-input" id="acType"><option value="local">Local business (GBP, map pack)</option><option value="national">National / e-commerce (no GBP)</option></select><button class="btn primary" id="addClientSubmit">Create client</button></div></div><div class="card settings-card"><h3>Connection status</h3><div class="connection-list"><div><span>Scheduler</span><strong>${esc(s.scheduler_mode)}</strong></div><div><span>Model policy</span><strong>Cheap by default</strong></div><div><span>Approval safety</span><strong>State first, production later</strong></div></div></div><div class="card settings-card" style="grid-column:1/-1"><h3>Safe action policy</h3><p>${esc(s.safe_actions)}</p><p><strong>Model policy:</strong> ${esc(s.model_policy)}</p><p><strong>Product setup goal:</strong> ${esc(s.onboarding_goal)}</p></div><div class="card settings-card danger-zone" style="grid-column:1/-1"><h3>Danger zone: delete client</h3><p>Settings-only destructive control. This removes the client and client-scoped prototype rows from SQLite. Production v1 should archive/export first, then require a stronger confirmation.</p><div class="delete-client-list">${clientRows}</div></div></div>`;
+  setTimeout(()=>{
+    document.querySelectorAll('[data-delete-client]').forEach(b=>b.onclick=()=>deleteClient(b.dataset.deleteClient));
+    const submit = document.getElementById('addClientSubmit');
+    if(submit) submit.onclick = showAddClientModal;
+  },0);
   return page('Settings & Routing','Client routing, data integrations, model policy, and safe action rules.', body);
+}
+
+async function showAddClientModal(){
+  const id = document.getElementById('acId')?.value?.trim() || '';
+  const name = document.getElementById('acName')?.value?.trim() || '';
+  let domain = document.getElementById('acDomain')?.value?.trim() || '';
+  const role = document.getElementById('acRole')?.value?.trim() || 'SEO client';
+  const client_type = document.getElementById('acType')?.value || 'local';
+  if(!id || !name || !domain){ toast('Client ID, name, and domain are required', true); return; }
+  if(!domain.startsWith('http')){ domain = 'https://' + domain; }
+  try{
+    const r = await api(`/api/clients/${encodeURIComponent(id)}/create`, {method:'POST', body:JSON.stringify({id, name, domain, role, client_type})});
+    if(r.ok){
+      toast(`Client "${name}" created ✓`);
+      state.client = 'all';
+      state.data = r.summary;
+      render();
+    } else {
+      toast(r.error || 'Failed to create client', true);
+    }
+  }catch(e){ toast('Create client failed', true); console.error(e); }
 }
 
 async function deleteClient(clientId){
@@ -301,8 +399,9 @@ async function deleteClient(clientId){
 }
 
 function renderView(){
-  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'Agent Tasks':tasksView,'Content':contentView,'Schedule':scheduleView,'CTR Tests':ctrView,'Activity Log':activityView,'Reports':reportsView,'Settings':settingsView};
+  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'GSC Keywords':gscView,'Content Briefs':contentBriefsView,'Prospects':prospectsView,'Agent Tasks':tasksView,'Content':contentView,'Schedule':scheduleView,'CTR Tests':ctrView,'Activity Log':activityView,'Reports':reportsView,'Settings':settingsView};
   $('#view').innerHTML = (map[state.section] || commandCenter)();
+  if(state.section === 'Prospects' && window.bindProspectsView) window.bindProspectsView();
 }
 function render(){ renderNav(); renderTabs(); renderContext(); renderView(); bindNotifyBtn(); }
 function toast(msg, error=false){
@@ -330,9 +429,98 @@ function bindNotifyBtn(){
       }catch(e){ toast('Thread creation failed', true); console.error(e); }
     };
   }
+  const gscBtn = $('#gscPullBtn');
+  if(gscBtn){
+    gscBtn.onclick = async () => {
+      try { const r = await api('/api/gsc/pull',{method:'POST',body:JSON.stringify({client_id:state.client})}); toast('GSC data pulled ✓'); load().catch(()=>{}); }
+      catch(e){ toast('GSC pull failed', true); console.error(e); }
+    };
+  }
+  const ga4Btn = $('#ga4PullBtn');
+  if(ga4Btn){
+    ga4Btn.onclick = async () => {
+      try { const r = await api('/api/refresh',{method:'POST',body:JSON.stringify({client_id:state.client})}); toast('GA4 data pulled ✓'); load().catch(()=>{}); }
+      catch(e){ toast('GA4 pull failed', true); console.error(e); }
+    };
+  }
+  // Show last pull timestamps
+  const events = state.data.events || [];
+  const lastGa4 = events.find(e => e.source === 'ga4_pull');
+  const lastGsc = events.find(e => e.source === 'gsc_pull');
+  const lastGa4El = $('#lastGa4Pull');
+  const lastGscEl = $('#lastGscPull');
+  if(lastGa4El && lastGa4) lastGa4El.textContent = new Date(lastGa4.created_at).toLocaleString();
+  if(lastGscEl && lastGsc) lastGscEl.textContent = new Date(lastGsc.created_at).toLocaleString();
 }
 $('#refreshBtn').onclick = async () => {
   try { const r = await api('/api/refresh',{method:'POST',body:JSON.stringify({client_id:state.client})}); state.data=r.summary; toast('Dashboard data refreshed'); render(); }
   catch(e){ toast('Refresh failed', true); console.error(e); }
 };
 load().catch(e => { console.error(e); $('#view').innerHTML = `<div class="warning">Could not load SEO OS data. Is server.py running?</div>`; });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROSPECTS MODULE — Inline in app.js for reliability
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function prospectsView(){
+  const prospects = (window._prospectData || []);
+  const stats = window._prospectStats || { by_status: {}, by_pipeline: {}, by_city: {} };
+  const statusChips = Object.keys(stats.by_status).map(s => `<span class="prospect-chip status-${s}">${s.replace(/_/g,' ')}: ${stats.by_status[s]}</span>`).join('');
+  const stages = ['new', 'contacted', 'pitched', 'negotiation', 'closed_won', 'closed_lost'];
+  const stageLabels = {new:'New',contacted:'Contacted',pitched:'Pitched',negotiation:'Negotiation',closed_won:'Closed-Won',closed_lost:'Closed-Lost'};
+  const pipelineBar = `<div class="pipeline-bar">${stages.map(s => `<div class="pipeline-stage ${stats.by_pipeline[s] ? 'active' : ''}"><div class="pipeline-count">${stats.by_pipeline[s] || 0}</div><div class="pipeline-label">${stageLabels[s]}</div></div>`).join('')}</div>`;
+  const rows = prospects.map(p => `<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.keyword)}</td><td>${esc(p.city)}</td><td>${esc(p.niche)}</td><td class="rank-cell">${p.rank||'—'}</td><td class="score-cell">${p.score||'—'}</td><td style="font-size:11px">${esc((p.website||'').replace(/^https?:\/\//,''))}</td><td><span class="tag ${p.status==='closed_won'?'green':p.status==='closed_lost'?'red':p.status==='contacted'?'blue':'muted'}">${(p.status||'').replace(/_/g,' ')}</span></td><td><span class="tag ${p.pipeline_stage==='closed_won'?'green':p.pipeline_stage==='closed_lost'?'red':'blue'}">${(p.pipeline_stage||'').replace(/_/g,' ')}</span></td><td class="prospect-actions"><button class="icon-btn" data-dm-opener="${p.id}" title="Copy FB DM opener">📋</button><button class="icon-btn" data-log-activity="${p.id}" title="Log activity">📝</button><button class="icon-btn" data-advance="${p.id}" title="Advance pipeline">→</button><button class="icon-btn" data-delete-prospect="${p.id}" title="Delete">✕</button></td></tr>`).join('');
+  return page('Prospects', 'Your prospecting pipeline — better than a Google sheet.', `${pipelineBar}<div class="prospect-stats">${statusChips}</div><div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Rank</th><th>Score</th><th>Website</th><th>Status</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="10" class="empty">No prospects yet. Click "Add Prospect" to get started.</td></tr>'}</tbody></table></div></div>`);
+}
+
+function showCreateModal(){
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="prospect-modal"><div class="modal-head"><h3>New Prospect</h3><button class="modal-close" data-close-modal>×</button></div><div class="modal-body"><label>Business Name *</label><input class="modal-input" id="newName" placeholder="e.g. Edel Roofing" /><label>Phone</label><input class="modal-input" id="newPhone" placeholder="(956) 555-1234" /><label>Email</label><input class="modal-input" id="newEmail" type="email" placeholder="owner@example.com" /><label>Website</label><input class="modal-input" id="newWebsite" placeholder="https://example.com" /><label>Keyword</label><input class="modal-input" id="newKeyword" placeholder="e.g. roofing contractor" /><label>City</label><input class="modal-input" id="newCity" placeholder="e.g. Edinburg" /><label>Niche</label><input class="modal-input" id="newNiche" placeholder="e.g. Roofing" /><label>Current Rank (1-10)</label><input class="modal-input" id="newRank" type="number" min="1" max="10" placeholder="4" /><label>Score (1-100)</label><input class="modal-input" id="newScore" type="number" min="1" max="100" placeholder="7" /><label>Channel</label><select class="modal-input" id="newChannel"><option value="fb_dm">FB DM</option><option value="email">Email</option><option value="phone">Phone</option><option value="linkedin">LinkedIn</option><option value="in_person">In Person</option></select><label>Notes</label><textarea class="modal-input" id="newNotes" rows="2" placeholder="Any relevant info..."></textarea><button class="btn primary" id="saveNewProspect">Create Prospect</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('[data-close-modal]').onclick = () => modal.remove();
+  modal.querySelector('#saveNewProspect').onclick = async () => {
+    const name = document.getElementById('newName').value.trim();
+    if(!name) { toast('Business name is required', true); return; }
+    const data = { name, phone: document.getElementById('newPhone').value.trim(), email: document.getElementById('newEmail').value.trim(), website: document.getElementById('newWebsite').value.trim(), keyword: document.getElementById('newKeyword').value.trim(), city: document.getElementById('newCity').value.trim(), niche: document.getElementById('newNiche').value.trim(), rank: document.getElementById('newRank').value, score: document.getElementById('newScore').value, channel: document.getElementById('newChannel').value, notes: document.getElementById('newNotes').value.trim() };
+    const r = await api('/api/prospects/create', { method: 'POST', body: JSON.stringify(data) });
+    if(r.ok) { toast('Prospect created ✓'); modal.remove(); load().then(() => render()); }
+    else { toast('Failed to create prospect', true); }
+  };
+}
+
+function showActivityModal(prospectId){
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="prospect-modal"><div class="modal-head"><h3>Log Activity</h3><button class="modal-close" data-close-modal>×</button></div><div class="modal-body"><label>Activity Type</label><select class="modal-input" id="activityType"><option value="call">Phone Call</option><option value="fb_dm">FB DM</option><option value="email">Email</option><option value="message">Text Message</option><option value="linkedin">LinkedIn</option><option value="in_person">In Person</option><option value="research">Research</option><option value="note">General Note</option></select><label>Note</label><textarea class="modal-input" id="activityNote" rows="3" placeholder="What happened?"></textarea><button class="btn primary" id="saveActivity">Log Activity</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('[data-close-modal]').onclick = () => modal.remove();
+  modal.querySelector('#saveActivity').onclick = async () => {
+    const type = document.getElementById('activityType').value;
+    const note = document.getElementById('activityNote').value;
+    await api('/api/prospects/log_activity', { method: 'POST', body: JSON.stringify({ prospect_id: prospectId, activity_type: type, note: note }) });
+    toast('Activity logged ✓'); modal.remove(); load().then(() => render());
+  };
+}
+
+function bindProspectsView(){
+  const addBtn = document.getElementById('addProspectBtn');
+  if(addBtn) addBtn.onclick = showCreateModal;
+  const searchInput = document.getElementById('prospectSearch');
+  if(searchInput) searchInput.oninput = debounceFn((e) => { load({ q: e.target.value }).then(() => render()); }, 300);
+  document.querySelectorAll('[data-dm-opener]').forEach(btn => { btn.onclick = async () => { try { const r = await api('/api/prospects/dm_opener?id=' + btn.dataset.dmOpener); if(r.ok && r.opener) { await navigator.clipboard.writeText(r.opener); toast('DM opener copied ✓'); } } catch(e) { toast('Copy failed', true); } }; });
+  document.querySelectorAll('[data-log-activity]').forEach(btn => { btn.onclick = () => showActivityModal(btn.dataset.logActivity); });
+  document.querySelectorAll('[data-advance]').forEach(btn => { btn.onclick = async () => { const stages = ['new', 'contacted', 'pitched', 'negotiation', 'closed_won']; const r = await api('/api/prospects/detail?id=' + btn.dataset.advance); if(r.ok) { const current = r.pipeline_stage || 'new'; const idx = stages.indexOf(current); const next = stages[Math.min(idx + 1, stages.length - 1)]; await api('/api/prospects/update', { method: 'POST', body: JSON.stringify({ id: btn.dataset.advance, pipeline_stage: next }) }); toast(`Advanced to ${next} ✓`); load().then(() => render()); } }; });
+  document.querySelectorAll('[data-delete-prospect]').forEach(btn => { btn.onclick = async () => { if(!confirm('Delete this prospect permanently?')) return; await api('/api/prospects/delete', { method: 'POST', body: JSON.stringify({ id: btn.dataset.deleteProspect }) }); toast('Prospect deleted'); load().then(() => render()); }; });
+}
+
+function debounceFn(fn, ms){ let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); }; }
+
+async function initProspectsData(){
+  try { const r = await api('/api/prospects/list'); if(r.ok) { window._prospectData = r.prospects || []; window._prospectStats = { total: r.total, by_status: r.by_status, by_pipeline: r.by_pipeline, by_city: r.by_city }; } } catch(e) { console.error('Failed to load prospects:', e); }
+}
+
+// Load prospects data on page load
+initProspectsData();
+
+

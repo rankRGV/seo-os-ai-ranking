@@ -23,6 +23,7 @@ generated/*
 *credentials*.json
 *client_secret*.json
 *token*.json
+data/gbp_credentials.json
 *.pem
 *.key
 
