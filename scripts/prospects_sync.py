@@ -153,11 +153,45 @@ def update_prospect_from_sheet(data):
     conn.close()
 
 
+# Status normalization map (Sheet values → canonical values)
+STATUS_MAP = {
+    'new': 'new',
+    'contacted': 'contacted',
+    'pitched': 'pitched',
+    'negotiation': 'negotiation',
+    'closed_won': 'closed_won',
+    'closed_lost': 'closed_lost',
+    'not_interested': 'not_interested',
+    'not interested': 'not_interested',
+    'wrong_city': 'wrong_city',
+    'wrong city': 'wrong_city',
+    'engaged': 'engaged',
+    'message_sent': 'message_sent',
+    'message sent': 'message_sent',
+    'replied': 'replied',
+    'active': 'active',
+    'fb dm sent': 'message_sent',
+    'fb_dm_sent': 'message_sent',
+}
+
+def normalize_status(raw):
+    """Normalize status from Sheet to canonical form."""
+    key = str(raw).strip().lower().replace('-', '_').replace('  ', ' ')
+    if key in STATUS_MAP:
+        return STATUS_MAP[key]
+    # Try with underscores replaced by spaces
+    key_spaces = key.replace('_', ' ')
+    if key_spaces in STATUS_MAP:
+        return STATUS_MAP[key_spaces]
+    return str(raw).strip().lower().replace(' ', '_') or 'new'
+
+
 # ─── Sync logic ──────────────────────────────────────────────────────────────
 def sheet_row_to_dict(row):
     """Convert a Sheet row (list) to a dict."""
     while len(row) < 14:
         row.append('')
+    raw_status = str(row[12]).strip()
     return {
         'name': str(row[0]).strip(),
         'phone': str(row[1]).strip(),
@@ -171,7 +205,7 @@ def sheet_row_to_dict(row):
         'social': str(row[9]).strip(),
         'fb_dm_opener': str(row[10]).strip(),
         'channel': str(row[11]).strip() if str(row[11]).strip() else 'FB DM',
-        'status': str(row[12]).strip() if str(row[12]).strip() else 'new',
+        'status': normalize_status(raw_status) if raw_status else 'new',
         'notes': str(row[13]).strip(),
     }
 
