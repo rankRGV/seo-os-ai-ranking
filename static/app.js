@@ -2,7 +2,7 @@ const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
   ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Activity Log','pulse'], ['Settings','settings']
 ];
-let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null, prospectFilter:'all', prospectSearch:'' };
+let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null, prospectFilter:'all', prospectSearch:'', sidebarCollapsed:false };
 
 const $ = sel => document.querySelector(sel);
 function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -475,7 +475,16 @@ function renderView(){
   $('#view').innerHTML = (map[state.section] || commandCenter)();
   if(state.section === 'Prospects' && window.bindProspectsView) window.bindProspectsView();
 }
-function render(){ renderNav(); renderTabs(); renderContext(); renderView(); bindNotifyBtn(); }
+function render(){ renderNav(); renderTabs(); renderContext(); renderView(); bindNotifyBtn(); bindSidebarToggle(); }
+function bindSidebarToggle(){
+  const btn = $('#sidebarToggle');
+  if(btn) btn.onclick = () => {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    const app = $('#app');
+    if(state.sidebarCollapsed){ app.classList.add('sidebar-collapsed'); app.classList.remove('sidebar-open'); }
+    else { app.classList.remove('sidebar-collapsed'); }
+  };
+}
 function toast(msg, error=false){
   const el=document.createElement('div'); el.className=`toast ${error?'error':''}`; el.textContent=msg; document.body.appendChild(el); setTimeout(()=>el.remove(),2600);
 }
@@ -580,7 +589,7 @@ function prospectsView(){
       <td>${esc(p.niche)}</td>
       <td class="rank-cell">${p.rank||'—'}</td>
       <td class="score-cell">${p.score||'—'}</td>
-      <td style="font-size:11px">${esc((p.website||'').replace(/^https?:\/\//,''))}</td>
+      <td class="website-cell">${p.website ? `<a href="${esc(p.website)}" target="_blank" rel="noopener" class="website-link" title="${esc(p.website)}">${esc(safeHost(p.website)||p.website.replace(/^https?:\/\//,''))}</a>` : '—'}</td>
       <td>${statusSel}</td>
       <td>${channelSel}</td>
       <td><span class="tag ${p.pipeline_stage==='closed_won'?'green':p.pipeline_stage==='closed_lost'?'red':'blue'}">${(p.pipeline_stage||'new').replace(/_/g,' ')}</span></td>
