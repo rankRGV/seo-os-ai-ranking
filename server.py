@@ -975,12 +975,17 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/summary":
             client = parse_qs(parsed.query).get("client", ["all"])[0]
             days_str = parse_qs(parsed.query).get("days", ["0"])[0]
+            metric_days_str = parse_qs(parsed.query).get("metric_days", ["0"])[0]
             try:
                 days = int(days_str)
             except (ValueError, TypeError):
                 days = 0
+            try:
+                metric_days = int(metric_days_str)
+            except (ValueError, TypeError):
+                metric_days = 0
             with connect() as conn:
-                s = summary(conn, client, days)
+                s = summary(conn, client, days=days, metric_days=metric_days)
             self.json_response({"ok": True, "summary": s, **s})
             return
         if parsed.path == "/api/prospects/card":
