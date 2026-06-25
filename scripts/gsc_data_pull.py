@@ -64,29 +64,32 @@ def gsc_request(token, site_url, payload):
 def pull_gsc_data(token, site_url, days=28, row_limit=250):
     """Pull search analytics data from GSC.
     
-    Returns both query×page breakdown AND daily totals.
-    The query×page data is subject to API row limits (250 max),
-    so we also pull daily totals separately for accurate aggregate metrics.
+    Returns query×page breakdown and aggregate totals.
+    Uses no-dimensions query for accurate totals (date-dimension returns sampled data).
     """
     end_date = datetime.now(timezone.utc).date()
     start_date = end_date - timedelta(days=days)
 
-    # 1. Pull daily totals (accurate aggregate numbers)
-    daily_payload = {
+    # 1. Pull aggregate totals (no dimensions = exact totals for the date range)
+    totals_payload = {
         "startDate": start_date.isoformat(),
         "endDate": end_date.isoformat(),
-        "dimensions": ["date"],
-        "rowLimit": 250,
+        "rowLimit": 1,
         "startRow": 0,
         "dataState": "final"
     }
-    daily_result = gsc_request(token, site_url, daily_payload)
-    daily_clicks = 0
-    daily_impressions = 0
-    if daily_result and "rows" in daily_result:
-        for row in daily_result["rows"]:
-            daily_clicks += int(row.get("clicks", 0))
-            daily_impressions += int(row.get("impressions", 0))
+    total_clicks = 0
+    total_impressions = 0
+    avg_position = 0
+    try:
+        totals_result = gsc_request(token, site_url, totals_payload)
+        if totals_result and "rows" in totals_result and totals_result["rows"]:
+            row = totals_result["rows"][0]
+            total_clicks = int(row.get("clicks", 0))
+            total_impressions = int(row.get("impressions", 0))
+            avg_position = float(row.get("position", 0))
+    except Exception:
+        pass
 
     # 2. Pull query×page breakdown (for the opportunities table)
     all_rows = []
@@ -111,8 +114,9 @@ def pull_gsc_data(token, site_url, days=28, row_limit=250):
 
     return {
         "query_page_rows": all_rows,
-        "total_clicks": daily_clicks,
-        "total_impressions": daily_impressions,
+        "total_clicks": total_clicks,
+        "total_impressions": total_impressions,
+        "avg_position": avg_position,
     }
 
 
@@ -199,6 +203,10 @@ def main():
     args = parser.parse_args()
 
     token = get_token()
+    if not token:
+        print("ERROR: Could not get valid OAuth token", file=sys.stderr)
+        sys.exit(1)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 
@@ -226,27 +234,19 @@ def main():
             stored = store_gsc_data(conn, client["id"], site_url, result["query_page_rows"])
             total += stored
             print(f"  ✓ {stored} query×page rows stored")
-            print(f"  ✓ Totals: {result['total_clicks']} clicks, {result['total_impressions']} impressions")
+            print(f"  ✓ Totals: {result['total_clicks']} clicks, {result['total_impressions']} impressions, avg pos {result.get('avg_position',0):.1f}")
             
-            # Update metrics_snapshots — aggregate from gsc_performance for accurate totals
-            # (The GSC daily-dimension API returns unreliable aggregates, so we sum query×page rows)
+            # Update metrics_snapshots using direct API totals
             client_id = client["id"]
-            agg = conn.execute(
-                "SELECT COALESCE(SUM(clicks),0) as total_clicks, COALESCE(SUM(impressions),0) as total_impressions FROM gsc_performance WHERE client_id=?",
-                (client_id,)
-            ).fetchone()
-            total_clicks = agg["total_clicks"]
-            total_impressions = agg["total_impressions"]
-            avg_pos = conn.execute(
-                "SELECT AVG(position) FROM gsc_performance WHERE client_id=? AND position > 0",
-                (client_id,)
-            ).fetchone()
-            avg_rank = round(avg_pos[0], 1) if avg_pos[0] else 0
+            total_clicks = result["total_clicks"]
+            total_impressions = result["total_impressions"]
+            avg_rank = round(result["avg_position"], 1) if result.get("avg_position") else 0
             ctr = round(total_clicks / total_impressions, 4) if total_impressions > 0 else 0
 
+            label = f"Last {args.days} days"
             existing = conn.execute(
-                "SELECT id FROM metrics_snapshots WHERE client_id=? AND period_label='Last 28 days'",
-                (client_id,)
+                "SELECT id FROM metrics_snapshots WHERE client_id=? AND period_label=?",
+                (client_id, label)
             ).fetchone()
             if existing:
                 conn.execute(
@@ -258,12 +258,13 @@ def main():
                 mid = f"metric_{_uuid.uuid4().hex[:10]}"
                 conn.execute(
                     "INSERT INTO metrics_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (mid, client_id, "Last 28 days",
+                    (mid, client_id, label,
                      total_clicks, 0,
                      total_impressions, 0,
                      ctr, 0, avg_rank, 0, 0,
                      datetime.now(timezone.utc).replace(microsecond=0).isoformat())
                 )
+            print(f"  ✓ Metrics snapshot updated ({label})")
         else:
             print(f"  ✗ No GSC data returned")
 

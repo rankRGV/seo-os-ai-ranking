@@ -510,34 +510,36 @@ def get_gsc_site_for_client(client_id: str, domain: str) -> str:
 
 def pull_gsc_data(token: str, site_url: str, days: int = 28) -> dict:
     """Pull search analytics data from GSC.
-
-    Returns query×page breakdown and daily totals.
+    
+    Returns query×page breakdown and aggregate totals.
+    Uses no-dimensions query for accurate totals (date-dimension returns sampled data).
     """
     from datetime import datetime as _dt
     end_date = _dt.now(timezone.utc).date()
     start_date = end_date - timedelta(days=days)
 
-    # 1. Pull daily totals
-    daily_payload = {
+    # 1. Pull aggregate totals (no dimensions = exact totals for the date range)
+    totals_payload = {
         "startDate": start_date.isoformat(),
         "endDate": end_date.isoformat(),
-        "dimensions": ["date"],
-        "rowLimit": 250,
+        "rowLimit": 1,
         "startRow": 0,
         "dataState": "final",
     }
-    daily_clicks = 0
-    daily_impressions = 0
+    total_clicks = 0
+    total_impressions = 0
+    avg_position = 0
     try:
-        daily_result = gsc_request(token, site_url, daily_payload)
-        if daily_result and "rows" in daily_result:
-            for row in daily_result["rows"]:
-                daily_clicks += int(row.get("clicks", 0))
-                daily_impressions += int(row.get("impressions", 0))
+        totals_result = gsc_request(token, site_url, totals_payload)
+        if totals_result and "rows" in totals_result and totals_result["rows"]:
+            row = totals_result["rows"][0]
+            total_clicks = int(row.get("clicks", 0))
+            total_impressions = int(row.get("impressions", 0))
+            avg_position = float(row.get("position", 0))
     except Exception:
         pass
 
-    # 2. Pull query×page breakdown
+    # 2. Pull query×page breakdown (for opportunities table)
     all_rows = []
     start_row = 0
     while True:
@@ -563,8 +565,9 @@ def pull_gsc_data(token: str, site_url: str, days: int = 28) -> dict:
 
     return {
         "query_page_rows": all_rows,
-        "total_clicks": daily_clicks,
-        "total_impressions": daily_impressions,
+        "total_clicks": total_clicks,
+        "total_impressions": total_impressions,
+        "avg_position": avg_position,
     }
 
 
@@ -717,6 +720,7 @@ def pull_client_data(client_id: str, property_id: str, days: int = 28, gsc_site_
 
     # Pull GSC data if client has a site URL
     gsc_rows = 0
+    gsc_result = None
     if gsc_site_url:
         print(f"  Pulling GSC data for {gsc_site_url}...")
         try:
@@ -763,18 +767,10 @@ def pull_client_data(client_id: str, property_id: str, days: int = 28, gsc_site_
         prev_ctr = prev["ctr"] if prev else 0
         prev_rank = prev["avg_rank"] if prev else 0
 
-        # Update GSC metrics in the snapshot (aggregate from gsc_performance)
-        gsc_agg = conn.execute(
-            "SELECT COALESCE(SUM(clicks),0) as c, COALESCE(SUM(impressions),0) as i FROM gsc_performance WHERE client_id=?",
-            (client_id,)
-        ).fetchone()
-        gsc_avg_pos = conn.execute(
-            "SELECT AVG(position) FROM gsc_performance WHERE client_id=? AND position > 0",
-            (client_id,)
-        ).fetchone()
-        gsc_clicks = gsc_agg["c"]
-        gsc_impressions = gsc_agg["i"]
-        gsc_avg_rank = round(gsc_avg_pos[0], 1) if gsc_avg_pos[0] else 0
+        # Update GSC metrics from the direct API totals (accurate for the date range)
+        gsc_clicks = gsc_result["total_clicks"] if gsc_result else 0
+        gsc_impressions = gsc_result["total_impressions"] if gsc_result else 0
+        gsc_avg_rank = round(gsc_result["avg_position"], 1) if gsc_result and gsc_result.get("avg_position") else 0
         gsc_ctr = round(gsc_clicks / gsc_impressions, 4) if gsc_impressions > 0 else 0
 
         # Store metrics snapshot — preserve GSC data, add GA4 sessions as conversions placeholder
