@@ -593,6 +593,7 @@ function prospectsView(){
       <td class="rank-cell">${p.rank||'—'}</td>
       <td class="score-cell">${p.score||'—'}</td>
       <td class="website-cell">${p.website ? `<a href="${esc(p.website)}" target="_blank" rel="noopener" class="website-link" title="${esc(p.website)}">${esc(safeHost(p.website)||p.website.replace(/^https?:\/\//,''))}</a>` : '—'}</td>
+      <td class="website-cell">${p.social ? `<a href="${esc(p.social.startsWith('http') ? p.social : 'https://'+p.social)}" target="_blank" rel="noopener" class="website-link" title="${esc(p.social)}">FB</a>` : (p.website && p.website.includes('facebook.com') ? `<a href="${esc(p.website)}" target="_blank" rel="noopener" class="website-link">FB</a>` : '—')}</td>
       <td>${statusSel}</td>
       <td>${channelSel}</td>
       <td><span class="tag ${p.pipeline_stage==='closed_won'?'green':p.pipeline_stage==='closed_lost'?'red':'blue'}">${(p.pipeline_stage||'new').replace(/_/g,' ')}</span></td>
@@ -605,7 +606,7 @@ function prospectsView(){
     </tr>`;
   }).join('');
 
-  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Local Rank</th><th>Score</th><th>Website</th><th>Status</th><th>Channel</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="11" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
+  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th><th>City</th><th>Niche</th><th>Local Rank</th><th>Score</th><th>Website</th><th>Social</th><th>Status</th><th>Channel</th><th>Pipeline</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
 }
 
 function showReachOutModal(prospectId){

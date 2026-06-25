@@ -118,13 +118,17 @@ def insert_prospect(data):
     t = datetime.now(timezone.utc).isoformat()
     conn = get_conn()
     pid = f'prospect_{uuid.uuid4().hex[:12]}'
+    # Auto-populate social from website if it's a Facebook URL
+    social = data['social']
+    if not social and data.get('website') and 'facebook.com' in data['website'].lower():
+        social = data['website']
     conn.execute(
         """INSERT INTO prospects (id, name, phone, keyword, city, niche, score, rank,
            website, email, social, fb_dm_opener, channel, status, notes, pipeline_stage,
            created_at, updated_at)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (pid, data['name'], data['phone'], data['keyword'], data['city'], data['niche'],
-         data['score'], data['rank'], data['website'], data['email'], data['social'],
+         data['score'], data['rank'], data['website'], data['email'], social,
          data['fb_dm_opener'], data['channel'], data['status'], data['notes'], 'new', t, t)
     )
     conn.commit()
