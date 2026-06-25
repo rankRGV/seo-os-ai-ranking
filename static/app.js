@@ -612,30 +612,15 @@ function showReachOutModal(prospectId){
   const rank = p.rank || '—';
   const keyword = p.keyword || 'your service';
   const city = p.city || 'your area';
-  const name = p.name;
-  const channel = p.channel || 'FB DM';
 
-  // Generate messages based on channel
-  const fbDM = `Hey! Your business showed up when I was searching for "${keyword}" in ${city}. I noticed you're ranking #${rank} on Google — I can help you get to top 3. Mind if I send over a quick free audit? No pitch, just the data.`;
-  const email = `Subject: Quick question about your Google ranking\n\nHey there,\n\nYour business showed up when I was searching for "${keyword}" in ${city}. I noticed you're ranking #${rank} on Google's map pack.\n\nI help local businesses get more calls from Google. I put together a quick free audit showing exactly what it would take to get you into the top 3.\n\nWorth a look?\n\n— Eddie`;
-  const call = `Hi, this is Eddie with RankRGV. I was searching for "${keyword}" in ${city} and your business came up — I noticed you're ranking #${rank} on Google. I help local businesses get more calls from Google map pack. I've got a quick free audit that shows exactly what to do to get to top 3. Got 2 minutes?`;
-  const linkedin = `Hey! Your business came up when I was researching "${keyword}" in ${city}. I noticed you're ranking #${rank} on Google — I help local businesses get more calls from Google. Would you be open to a quick free audit?`;
-
-  const messages = { 'FB DM': fbDM, 'Email': email, 'Call': call, 'LinkedIn': linkedin };
-  const currentMsg = messages[channel] || fbDM;
+  const dm = `Hi, my name is Eddie and I'm with RankRGV. I help local businesses get found on Google.\n\nYour business showed up when I was searching for "${keyword}" in ${city}. I noticed you're ranking #${rank} on Google — I think I can help you get to top 3.\n\nDo you mind if I send over a quick audit? No pitch, just the data.`;
 
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
   modal.innerHTML = `<div class="prospect-modal reach-out-modal">
-    <div class="modal-head"><h3>📨 Reach Out</h3><button class="modal-close" data-close-modal>×</button></div>
+    <div class="modal-head"><h3>📨 Reach Out — DM</h3><button class="modal-close" data-close-modal>×</button></div>
     <div class="modal-body">
-      <div class="reach-out-tabs">
-        <button class="reach-tab ${channel==='FB DM'?'active':''}" data-msg-type="FB DM">DM</button>
-        <button class="reach-tab ${channel==='Email'?'active':''}" data-msg-type="Email">Email</button>
-        <button class="reach-tab ${channel==='Call'?'active':''}" data-msg-type="Call">Call Script</button>
-        <button class="reach-tab ${channel==='LinkedIn'?'active':''}" data-msg-type="LinkedIn">LinkedIn</button>
-      </div>
-      <textarea class="reach-out-msg" id="reachOutMsg">${esc(currentMsg)}</textarea>
+      <textarea class="reach-out-msg" id="reachOutMsg">${esc(dm)}</textarea>
       <div class="reach-out-actions">
         <button class="btn primary" id="copyReachOut">📋 Copy Message</button>
         <button class="btn" id="markSent">✓ Mark as Sent</button>
@@ -655,17 +640,6 @@ function showReachOutModal(prospectId){
 
   modal.querySelector('[data-close-modal]').onclick = () => modal.remove();
 
-  // Tab switching
-  modal.querySelectorAll('.reach-tab').forEach(tab => {
-    tab.onclick = () => {
-      modal.querySelectorAll('.reach-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const type = tab.dataset.msgType;
-      const msgs = { 'FB DM': fbDM, 'Email': email, 'Call': call, 'LinkedIn': linkedin };
-      modal.querySelector('#reachOutMsg').value = msgs[type] || fbDM;
-    };
-  });
-
   modal.querySelector('#copyReachOut').onclick = async () => {
     const msg = modal.querySelector('#reachOutMsg').value;
     await navigator.clipboard.writeText(msg);
@@ -675,7 +649,6 @@ function showReachOutModal(prospectId){
   modal.querySelector('#markSent').onclick = async () => {
     const newStatus = modal.querySelector('#postSendStatus').value;
     await api('/api/prospects/update', { method: 'POST', body: JSON.stringify({ id: prospectId, status: newStatus }) });
-    // Update local data
     if(p) p.status = newStatus;
     toast(`Status → ${newStatus.replace(/_/g,' ')} ✓`);
     modal.remove();
