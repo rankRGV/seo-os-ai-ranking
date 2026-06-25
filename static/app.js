@@ -1,6 +1,6 @@
 const sections = [
   ['Command Center','grid'], ['Clients / Sites','building'], ['Approvals','shield'], ['Opportunities','trend'],
-  ['Content Briefs','edit'], ['Prospects','target'], ['Agent Tasks','list'], ['Content','edit'], ['Schedule','calendar'], ['CTR Tests','target'], ['Activity Log','pulse'], ['Reports','file'], ['Settings','settings']
+  ['Command Queue','list'], ['Content Briefs','edit'], ['Prospects','target'], ['Outreach Cards','target'], ['Agent Tasks','list'], ['Content','edit'], ['Schedule','calendar'], ['CTR Tests','target'], ['Activity Log','pulse'], ['Reports','file'], ['Settings','settings']
 ];
 let state = { section:'Command Center', client:'all', filter:'All', oppFilter:'All', oppDays:0, briefFilter:'All', schedView:'calendar', schedRange:'7', reportClient:null, data:null };
 
@@ -153,7 +153,36 @@ function commandCenter(){
     </div>
   `).join('')}</div>` : '<div class="muted" style="font-size:13px">No GBP data. Add GBP credentials or run demo check.</div>';
 
+  // Opportunity Score widget
+  const scores = d.opportunity_scores || [];
+  const scoreWidget = scores.length > 0 ? `<div class="opp-score-grid">${scores.map(s => {
+    const color = s.score >= 70 ? '#16a34a' : s.score >= 40 ? '#ca8a04' : '#dc2626';
+    return `<div class="opp-score-card">
+      <div class="opp-score-header"><strong>${esc(s.name)}</strong><span class="opp-score-value" style="color:${color}">${s.score}</span></div>
+      <div class="opp-score-bar-bg"><div class="opp-score-bar-fill" style="width:${s.score}%;background:${color}"></div></div>
+      <div class="opp-score-action">${esc(s.next_best_action)}</div>
+    </div>`;
+  }).join('')}</div>` : '<div class="muted" style="font-size:13px">No opportunity scores yet. Run a data pull first.</div>';
+
+  // Health Trend widget (from client_health snapshots)
+  const healthTrend = (d.client_health || []).filter(h => h.trend && h.trend.length > 1);
+  const trendWidget = healthTrend.length > 0 ? `<div class="health-trend-grid">${healthTrend.map(h => {
+    const points = h.trend.map(p => `${p.date},${p.score}`).join(' ');
+    const latest = h.trend[h.trend.length-1].score;
+    const first = h.trend[0].score;
+    const diff = latest - first;
+    const arrow = diff > 0 ? '↗' : diff < 0 ? '↘' : '→';
+    const color = diff > 0 ? '#16a34a' : diff < 0 ? '#dc2626' : '#7E8C8A';
+    return `<div class="health-trend-card">
+      <div class="health-trend-header"><strong>${esc(clientName(h.client_id))}</strong><span style="color:${color};font-weight:800">${arrow} ${diff > 0 ? '+' : ''}${diff}</span></div>
+      <div class="health-trend-spark">${h.trend.map(p => `<span class="trend-dot" style="height:${Math.max(4,p.score/5)}px;background:${color}" title="${p.date}: ${p.score}"></span>`).join('')}</div>
+      <div class="health-trend-label">${h.trend.length} snapshots</div>
+    </div>`;
+  }).join('')}</div>` : '<div class="muted" style="font-size:13px">Health trend will appear after 2+ daily pulls.</div>';
+
   const body = `<div class="architecture"><span class="arch-pill blue">Discord</span><span class="arrow">→</span><span class="arch-pill green">Dashboard</span><span class="arrow">→</span><span class="arch-pill purple">Hermes Agents</span><span class="arrow">→</span><span class="arch-pill" style="background:#0f172a;color:#fff">Reports</span></div>${kpis}
+    ${section('Opportunity Score','Composite 0-100 score per client — higher means more untapped potential','trend','green',undefined, scoreWidget)}
+    ${section('Health Trend','Score change over time — ↗ improving, ↘ declining, → stable','pulse','blue',undefined, trendWidget)}
     ${section('Client Health','Overall SEO health per client — green thriving, yellow needs attention, red at-risk','activity','purple',undefined, healthWidget)}
     ${section('Google Business Profile','Local business health — views, actions, reviews for local clients','building','green',undefined, gbpWidget)}
     ${section('Needs Your Attention Today','Decisions and approvals the agents are waiting on','alert','red',`${needs.length} items`, simpleTable(['Client','Item','Type','Priority','Why it matters','Action'], needs))}
@@ -398,8 +427,51 @@ async function deleteClient(clientId){
   }catch(e){ toast('Client deletion failed', true); console.error(e); }
 }
 
+function commandQueueView(){
+  const d = state.data;
+  const queue = d.opportunity_queue || [];
+  const filters = ['All','High','Medium','Low'];
+  const fhtml = `<div class="filters">${filters.map(f=>`<button class="btn filter ${state.filter===f?'active':''}" data-filter="${f}">${f}</button>`).join('')}</div>`;
+  let rows = queue;
+  if(state.filter==='High') rows = rows.filter(q=>q.impact==='High');
+  if(state.filter==='Medium') rows = rows.filter(q=>q.impact==='Medium');
+  if(state.filter==='Low') rows = rows.filter(q=>q.impact==='Low');
+  const tableRows = rows.map(q => `<tr><td><span class="client-cell"><span class="dot ${clientDot(q.client_id)}"></span>${esc(q.business)}</span></td><td><span class="tag ${q.type==='Opportunity'?'blue':q.type==='GSC'?'green':q.type==='GBP'?'purple':'amber'}">${esc(q.type_label)}</span></td><td><strong>${esc(q.opportunity)}</strong><div class="muted" style="font-size:11px">${esc(q.evidence)}</div></td><td><span class="tag ${q.impact==='High'?'red':q.impact==='Medium'?'amber':'green'}">${esc(q.impact)}</span></td><td><span class="tag ${q.effort==='Low'?'green':q.effort==='Medium'?'amber':'red'}">${esc(q.effort)}</span></td><td class="muted" style="max-width:200px">${esc(q.next_action)}</td><td><span class="tag ${classForStatus(q.status)}">${label(q.status)}</span></td></tr>`);
+  setTimeout(()=>document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;render()}),0);
+  return page('Command Queue','Unified action list — SERP gaps, GBP gaps, and opportunities sorted by impact','All priorities, one queue.', fhtml + section('Queue',`${rows.length} items`,'list','blue',rows.length, simpleTable(['Client','Type','Opportunity','Impact','Effort','Next Action','Status'], tableRows)));
+}
+
+function outreachCardsView(){
+  const prospects = (window._prospectData || []);
+  if(prospects.length === 0) return page('Outreach Cards','One-click pitch generator — rank + competitor gaps + channel recommendation.','<div class="empty">No prospects yet. Add prospects manually or import from Google Sheets.</div>');
+  const cards = prospects.map(p => {
+    const rank = p.rank || '—';
+    const score = p.score || '—';
+    const channel = p.channel || 'FB DM';
+    const pitch = `Hey! I was searching for "${p.keyword || 'your service'}" in ${p.city || 'your area'} and came across ${p.name}. You're ranking #${rank} — I can help you get to top 3. Mind if I send a quick free audit?`;
+    return `<div class="card outreach-card">
+      <div class="outreach-header"><strong>${esc(p.name)}</strong><span class="tag blue">${esc(channel)}</span></div>
+      <div class="outreach-meta"><span>📍 ${esc(p.city||'—')}</span><span>🏷 ${esc(p.niche||'—')}</span><span>📊 Rank: ${esc(rank)}</span><span>⭐ Score: ${esc(score)}</span></div>
+      <div class="outreach-pitch">${esc(pitch)}</div>
+      <div class="outreach-actions"><button class="btn primary" data-copy-pitch="${p.id}">📋 Copy Pitch</button><button class="btn" data-dm-opener="${p.id}">📨 DM Opener</button></div>
+    </div>`;
+  }).join('');
+  setTimeout(()=>{
+    document.querySelectorAll('[data-copy-pitch]').forEach(b=>b.onclick=async()=>{
+      const p = prospects.find(x=>x.id===b.dataset.copyPitch);
+      if(p){
+        const pitch = `Hey! I was searching for "${p.keyword||'your service'}" in ${p.city||'your area'} and came across ${p.name}. You're ranking #${p.rank||'—'} — I can help you get to top 3. Mind if I send a quick free audit?`;
+        await navigator.clipboard.writeText(pitch);
+        toast('Pitch copied ✓');
+      }
+    });
+    document.querySelectorAll('[data-dm-opener]').forEach(btn => { btn.onclick = async () => { try { const r = await api('/api/prospects/dm_opener?id=' + btn.dataset.dmOpener); if(r.ok && r.opener) { await navigator.clipboard.writeText(r.opener); toast('DM opener copied ✓'); } } catch(e) { toast('Copy failed', true); } }; });
+  },0);
+  return page('Outreach Cards','One-click pitch generator for your prospects — copy and send.','<div class="outreach-grid">' + cards + '</div>');
+}
+
 function renderView(){
-  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'GSC Keywords':gscView,'Content Briefs':contentBriefsView,'Prospects':prospectsView,'Agent Tasks':tasksView,'Content':contentView,'Schedule':scheduleView,'CTR Tests':ctrView,'Activity Log':activityView,'Reports':reportsView,'Settings':settingsView};
+  const map = {'Command Center':commandCenter,'Clients / Sites':clientsView,'Approvals':approvalsView,'Opportunities':opportunitiesView,'Command Queue':commandQueueView,'GSC Keywords':gscView,'Content Briefs':contentBriefsView,'Prospects':prospectsView,'Outreach Cards':outreachCardsView,'Agent Tasks':tasksView,'Content':contentView,'Schedule':scheduleView,'CTR Tests':ctrView,'Activity Log':activityView,'Reports':reportsView,'Settings':settingsView};
   $('#view').innerHTML = (map[state.section] || commandCenter)();
   if(state.section === 'Prospects' && window.bindProspectsView) window.bindProspectsView();
 }
