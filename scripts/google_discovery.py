@@ -123,11 +123,16 @@ def discover_ga4_properties():
             account_name = account.get("displayName", "Unknown Account")
             for prop in account.get("propertySummaries", []):
                 prop_id = prop.get("property", "").split("/")[-1]  # properties/123456 → 123456
+                prop_name = prop.get("displayName", "")
+                domain = _ga4_property_domain(prop_id, access_token)
+                # Fallback: extract domain from property name if metadata API didn't return one
+                if not domain:
+                    domain = _extract_domain(prop_name)
                 properties.append({
                     "propertyId": prop_id,
-                    "propertyName": prop.get("displayName", ""),
+                    "propertyName": prop_name,
                     "accountName": account_name,
-                    "domain": _ga4_property_domain(prop_id, access_token)
+                    "domain": domain
                 })
         
         return {"ok": True, "properties": properties}
@@ -153,21 +158,58 @@ def _ga4_property_domain(property_id, access_token):
 
 # ─── Cross-reference ─────────────────────────────────────────────────────────
 
+def _normalize(name):
+    """Normalize a name for fuzzy matching: lowercase, strip suffixes, remove non-alnum."""
+    import re
+    name = name.lower().strip()
+    # Remove TLDs
+    for tld in [".com", ".net", ".org", ".edu", ".io", ".co"]:
+        name = name.replace(tld, "")
+    # Remove common suffixes
+    for suffix in [" - ga4", " - ga", " ga4", " website", " - gsc", " sc-domain:", " - monsterinsights", "/ ga4"]:
+        name = name.replace(suffix, "")
+    # Keep only alphanumeric
+    return re.sub(r'[^a-z0-9]', '', name)
+
+
+def _match_score(gsc_domain, ga4_name):
+    """Return 0-1 score for how well a GSC domain matches a GA4 property name."""
+    g = _normalize(gsc_domain)
+    n = _normalize(ga4_name)
+    if not g or not n:
+        return 0
+    # Exact normalized match
+    if g == n:
+        return 1.0
+    # One contains the other
+    if g in n or n in g:
+        return 0.9
+    # Check if domain keyword appears in name (e.g. "rankrgv" in "rankrgv - ga4")
+    g_words = set(_normalize(gsc_domain).split('.')) if '.' in gsc_domain else set([g])
+    n_words = set(_normalize(ga4_name).split('-')) if '-' in ga4_name else set([n])
+    g_core = g.split('.')[0]  # rankrgv from rankrgv.com
+    if g_core in n or n in g_core:
+        return 0.85
+    return 0
+
+
 def discover_all():
-    """Discover GSC sites + GA4 properties and cross-reference with existing clients."""
+    """Discover GSC sites + GA4 properties, fuzzy-match by name, cross-reference with existing clients."""
     gsc = discover_gsc_sites()
     ga4 = discover_ga4_properties()
-    
-    # Build lookup maps by domain
-    gsc_by_domain = {}
-    for s in gsc.get("sites", []):
-        gsc_by_domain[s["domain"]] = s
-    
-    ga4_by_domain = {}
-    for p in ga4.get("properties", []):
-        if p["domain"]:
-            ga4_by_domain[p["domain"]] = p
-    
+
+    gsc_sites = gsc.get("sites", [])
+    ga4_props = ga4.get("properties", [])
+
+    # Deduplicate GSC sites by domain (keep highest permission)
+    permission_order = {"siteOwner": 3, "siteFullUser": 2, "siteRestrictedUser": 1, "siteUnverifiedUser": 0}
+    gsc_deduped = {}
+    for s in gsc_sites:
+        d = s["domain"]
+        if d not in gsc_deduped or permission_order.get(s.get("permissionLevel",""), 0) > permission_order.get(gsc_deduped[d].get("permissionLevel",""), 0):
+            gsc_deduped[d] = s
+    gsc_sites = list(gsc_deduped.values())
+
     # Get existing client domains from DB
     existing_domains = set()
     try:
@@ -179,51 +221,77 @@ def discover_all():
         conn.close()
     except:
         pass
-    
-    # Merge: all unique domains from both GSC and GA4
-    all_domains = set(gsc_by_domain.keys()) | set(ga4_by_domain.keys())
-    
-    candidates = []
-    for domain in sorted(all_domains):
-        if not domain:
-            continue
-        gsc_info = gsc_by_domain.get(domain, {})
-        ga4_info = ga4_by_domain.get(domain, {})
-        existing = domain in existing_domains
 
+    # Track which GA4 props have been matched
+    matched_ga4 = set()
+
+    # First pass: match GSC sites to GA4 properties by name similarity
+    candidates = []
+    for s in gsc_sites:
+        domain = s["domain"]
+        best_ga4 = None
+        best_score = 0
+        for i, p in enumerate(ga4_props):
+            if i in matched_ga4:
+                continue
+            score = _match_score(domain, p.get("propertyName", ""))
+            if score > best_score:
+                best_score = score
+                best_ga4 = i
+
+        # Threshold: 0.7 means "pretty sure it's the same"
+        if best_ga4 is not None and best_score >= 0.7:
+            matched_ga4.add(best_ga4)
+            ga4_info = ga4_props[best_ga4]
+        else:
+            ga4_info = None
+
+        existing = domain in existing_domains
         candidates.append({
             "domain": domain,
-            "name": gsc_info.get("siteUrl", ga4_info.get("propertyName", domain)),
+            "name": s.get("siteUrl", domain),
             "businessName": _domain_to_business_name(domain),
-            "in_gsc": bool(gsc_info),
-            "gsc": bool(gsc_info),
+            "gsc": True,
             "ga4": bool(ga4_info),
-            "gsc_permission": gsc_info.get("permissionLevel", ""),
-            "in_ga4": bool(ga4_info),
-            "ga4_property_id": ga4_info.get("propertyId", ""),
-            "ga4_property_name": ga4_info.get("propertyName", ""),
-            "already_added": existing
+            "gsc_permission": s.get("permissionLevel", ""),
+            "ga4_property_id": ga4_info.get("propertyId", "") if ga4_info else "",
+            "ga4_property_name": ga4_info.get("propertyName", "") if ga4_info else "",
+            "already_added": existing,
+            "match_confidence": round(best_score, 2) if ga4_info else 0
         })
 
-    # Also include GA4 properties without a domain match
-    for prop in ga4.get("properties", []):
-        d = prop.get("domain", "")
-        if d and (d in gsc_by_domain or d in [c["domain"] for c in candidates]):
+    # Second pass: unmatched GA4 properties — try to merge with existing candidate by domain
+    for i, p in enumerate(ga4_props):
+        if i in matched_ga4:
             continue
-        candidates.append({
-            "domain": d,
-            "name": prop.get("propertyName", ""),
-            "businessName": prop.get("propertyName", "").replace(" - GA4", ""),
-            "in_gsc": False,
-            "gsc": False,
-            "ga4": True,
-            "gsc_permission": "",
-            "in_ga4": True,
-            "ga4_property_id": prop.get("propertyId", ""),
-            "ga4_property_name": prop.get("propertyName", ""),
-            "already_added": False,
-            "no_domain_match": True
-        })
+        domain = _extract_domain(p.get("domain", "")) if p.get("domain") else ""
+        # Check if an existing candidate already has this domain
+        merged = False
+        for c in candidates:
+            if c["domain"] and _extract_domain(c["domain"]) == domain:
+                # Merge: this GA4 property is an extra property for the same domain
+                c["ga4"] = True
+                if not c.get("ga4_property_id"):
+                    c["ga4_property_id"] = p.get("propertyId", "")
+                    c["ga4_property_name"] = p.get("propertyName", "")
+                merged = True
+                break
+        if not merged:
+            candidates.append({
+                "domain": p.get("domain", ""),
+                "name": p.get("propertyName", ""),
+                "businessName": p.get("propertyName", "").replace(" - GA4", "").strip(),
+                "gsc": False,
+                "ga4": True,
+                "gsc_permission": "",
+                "ga4_property_id": p.get("propertyId", ""),
+                "ga4_property_name": p.get("propertyName", ""),
+                "already_added": domain in existing_domains if domain else False,
+                "match_confidence": 0
+            })
+
+    # Sort: already added last, then by name
+    candidates.sort(key=lambda c: (c.get("already_added", False), c.get("businessName", "").lower()))
 
     return {
         "ok": True,
@@ -235,8 +303,8 @@ def discover_all():
         "sites": [c for c in candidates if not c.get("already_added")],
         "summary": {
             "total": len(candidates),
-            "with_gsc": sum(1 for c in candidates if c["in_gsc"]),
-            "with_ga4": sum(1 for c in candidates if c["in_ga4"]),
+            "with_gsc": sum(1 for c in candidates if c["gsc"]),
+            "with_ga4": sum(1 for c in candidates if c["ga4"]),
             "already_added": sum(1 for c in candidates if c["already_added"])
         }
     }
@@ -244,16 +312,21 @@ def discover_all():
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _extract_domain(site_url):
-    """Extract clean domain from GSC site URL or any URL. Strips www."""
+    """Extract clean domain from GSC site URL, GA4 property name, or any URL. Strips www."""
     if not site_url:
         return ""
+    name = site_url.strip()
     # sc-domain:example.com → example.com
-    if site_url.startswith("sc-domain:"):
-        d = site_url.replace("sc-domain:", "").strip("/")
-    elif "://" in site_url:
-        d = site_url.split("://")[1].strip("/").split("/")[0]
+    if name.startswith("sc-domain:"):
+        d = name.replace("sc-domain:", "").strip("/")
+    elif "://" in name:
+        d = name.split("://")[1].strip("/").split("/")[0]
+    elif "." in name and " " not in name and "-" not in name:
+        # Looks like a bare domain: www.edelroofing.com or edelroofing.com
+        d = name
     else:
-        d = site_url.strip("/")
+        # GA4 property name like "RankRGV Website" or "Texas Cheap Flights Website" — no domain
+        return ""
     # Normalize: strip www.
     if d.startswith("www."):
         d = d[4:]
