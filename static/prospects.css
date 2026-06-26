@@ -32,6 +32,20 @@
 .modal-body label{font-size:11px;font-weight:700;color:var(--subtle);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
 .modal-input{border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13px;outline:none;font-family:inherit}
 .modal-input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(22,99,55,.1)}
+.modal-tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--line);padding-bottom:0}
+.modal-tab{background:none;border:0;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;color:var(--subtle);border-bottom:2px solid transparent;margin-bottom:-1px}
+.modal-tab.active{color:var(--green);border-bottom-color:var(--green)}
+.mc-tab-panel{display:grid;gap:0}
+.google-site-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;cursor:pointer;transition:.15s}
+.google-site-item:hover{border-color:var(--green);background:#f0fdf4}
+.google-site-item input[type=checkbox]{width:16px;height:16px;accent-color:#166535}
+.google-site-info{display:flex;flex-direction:column;flex:1;min-width:0}
+.google-site-info strong{font-size:13px;font-weight:700}
+.google-site-info .muted{font-size:11px}
+.google-site-badges{display:flex;gap:4px;flex-shrink:0}
+.google-site-badges .badge{font-size:10px;padding:2px 5px;border-radius:10px;font-weight:700}
+.google-site-badges .badge.green{background:#dcfce7;color:#166535}
+.google-site-badges .badge.red{background:#fef2f2;color:#991b1b}
 textarea.modal-input{resize:vertical;min-height:60px}
 /* GBP Health Widget */
 .gbp-health-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}

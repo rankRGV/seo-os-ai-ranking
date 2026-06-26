@@ -1012,6 +1012,14 @@ class Handler(SimpleHTTPRequestHandler):
                 trend = get_health_trend(conn, client_id, days)
             self.json_response({"ok": True, "trend": trend})
             return
+        if parsed.path == "/api/google/discover":
+            try:
+                from scripts.google_discovery import discover_all
+                result = discover_all()
+                self.json_response({"ok": True, **result})
+            except Exception as e:
+                self.json_response({"ok": False, "error": str(e)}, 500)
+            return
         super().do_GET()
 
 

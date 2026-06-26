@@ -436,30 +436,116 @@ function openAddClientModal(){
   const modal = document.createElement('div');
   modal.id = 'modal';
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="prospect-modal" style="max-width:480px">
+  modal.innerHTML = `<div class="prospect-modal" style="max-width:560px">
     <div class="modal-head"><h3>➕ Add New Client</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="modal-body">
-      <p class="muted">Onboard a new client. Connect GSC + GA4 after creation.</p>
-      <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
-        <label>Client ID *</label>
-        <input class="modal-input" id="mcId" placeholder="e.g. edel-roofing" />
-        <label>Business name *</label>
-        <input class="modal-input" id="mcName" placeholder="e.g. Edel Roofing" />
-        <label>Domain *</label>
-        <input class="modal-input" id="mcDomain" placeholder="https://edelroofing.com" />
-        <label>Role / niche</label>
-        <input class="modal-input" id="mcRole" placeholder="e.g. Roofing contractor" />
-        <label>Client type</label>
-        <select class="modal-input" id="mcType"><option value="local">Local business (GBP, map pack)</option><option value="national">National / e-commerce (no GBP)</option></select>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn primary" id="mcSubmit">Create client</button>
+      <div class="modal-tabs" id="mcTabs">
+        <button class="modal-tab active" data-mc-tab="manual">Manual Entry</button>
+        <button class="modal-tab" data-mc-tab="google">From Google</button>
+      </div>
+
+      <!-- Manual tab -->
+      <div class="mc-tab-panel" id="mcTabManual">
+        <p class="muted">Onboard a new client. Connect GSC + GA4 after creation.</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+          <label>Client ID *</label>
+          <input class="modal-input" id="mcId" placeholder="e.g. edel-roofing" />
+          <label>Business name *</label>
+          <input class="modal-input" id="mcName" placeholder="e.g. Edel Roofing" />
+          <label>Domain *</label>
+          <input class="modal-input" id="mcDomain" placeholder="https://edelroofing.com" />
+          <label>Role / niche</label>
+          <input class="modal-input" id="mcRole" placeholder="e.g. Roofing contractor" />
+          <label>Client type</label>
+          <select class="modal-input" id="mcType"><option value="local">Local business (GBP, map pack)</option><option value="national">National / e-commerce (no GBP)</option></select>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn primary" id="mcSubmit">Create client</button>
+            <button class="btn" onclick="closeModal()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Google tab -->
+      <div class="mc-tab-panel" id="mcTabGoogle" style="display:none">
+        <p class="muted">Sites your Google account has access to. Check to add.</p>
+        <div id="mcGoogleList" style="margin-top:12px">
+          <div class="muted">Loading...</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn primary" id="mcGoogleAdd" disabled>Add Selected (<span id="mcGoogleCount">0</span>)</button>
           <button class="btn" onclick="closeModal()">Cancel</button>
         </div>
       </div>
     </div>
   </div>`;
   document.body.appendChild(modal);
+
+  // Tab switching
+  modal.querySelectorAll('[data-mc-tab]').forEach(tab => {
+    tab.onclick = () => {
+      modal.querySelectorAll('[data-mc-tab]').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const which = tab.dataset.mcTab;
+      document.getElementById('mcTabManual').style.display = which === 'manual' ? '' : 'none';
+      document.getElementById('mcTabGoogle').style.display = which === 'google' ? '' : 'none';
+      if (which === 'google') loadGoogleSites();
+    };
+  });
+
   document.getElementById('mcSubmit').onclick = () => showAddClientModal();
+}
+
+async function loadGoogleSites(){
+  const list = document.getElementById('mcGoogleList');
+  list.innerHTML = '<div class="muted">Loading sites from Google...</div>';
+  try {
+    const r = await api('/api/google/discover');
+    if (!r.ok) { list.innerHTML = '<div class="muted">Failed to load: ' + (r.error || 'unknown error') + '</div>'; return; }
+    const sites = r.sites || [];
+    if (sites.length === 0) { list.innerHTML = '<div class="muted">No sites found in your Google accounts.</div>'; return; }
+    list.innerHTML = sites.map(s => `
+      <label class="google-site-item">
+        <input type="checkbox" class="google-site-check" data-domain="${esc(s.domain)}" data-name="${esc(s.name)}" data-gsc="${s.gsc}" data-ga4="${s.ga4}" />
+        <div class="google-site-info">
+          <strong>${esc(s.name)}</strong>
+          <span class="muted">${esc(s.domain)}</span>
+        </div>
+        <div class="google-site-badges">
+          <span class="badge ${s.gsc ? 'green' : 'red'}">GSC ${s.gsc ? '✓' : '✗'}</span>
+          <span class="badge ${s.ga4 ? 'green' : 'red'}">GA4 ${s.ga4 ? '✓' : '✗'}</span>
+        </div>
+      </label>`).join('');
+
+    // Update count on check
+    const updateCount = () => {
+      const n = list.querySelectorAll('.google-site-check:checked').length;
+      document.getElementById('mcGoogleCount').textContent = n;
+      document.getElementById('mcGoogleAdd').disabled = n === 0;
+    };
+    list.querySelectorAll('.google-site-check').forEach(cb => cb.onchange = updateCount);
+
+    // Add selected
+    document.getElementById('mcGoogleAdd').onclick = async () => {
+      const checked = [...list.querySelectorAll('.google-site-check:checked')];
+      let added = 0;
+      for (const cb of checked) {
+        const domain = cb.dataset.domain;
+        const name = cb.dataset.name || domain.replace(/^https?:\/\//, '').replace(/^www\./, '').split('.')[0];
+        const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const r = await api('/api/clients/' + encodeURIComponent(id) + '/create', {
+          method: 'POST',
+          body: JSON.stringify({ id, name, domain, role: 'SEO client', client_type: 'local' })
+        });
+        if (r.ok) added++;
+      }
+      toast(added + ' client(s) added ✓');
+      closeModal();
+      state.data = (await api('/api/summary')).summary;
+      render();
+    };
+  } catch(e) {
+    list.innerHTML = '<div class="muted">Error loading sites: ' + e.message + '</div>';
+  }
 }
 
 function closeModal(){
