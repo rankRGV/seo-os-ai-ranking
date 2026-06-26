@@ -954,7 +954,33 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.commit()
             self.json_response({"ok": True, "client_id": client_id, "summary": summary(conn, "all")})
             return
-        if parsed.path == "/api/gbp/health":
+        # ─── Update Client ─────────────────────────────────────────────────────
+        m = re.match(r"^/api/clients/([^/]+)/update$", parsed.path)
+        if m:
+            client_id = m.group(1)
+            data = body
+            with connect() as conn:
+                existing = one(conn, "SELECT id FROM clients WHERE id=?", (client_id,))
+                if not existing:
+                    self.json_response({"ok": False, "error": "Client not found"}, 404)
+                    return
+                # Build dynamic update from provided fields
+                fields = []
+                values = []
+                for key in ["name", "domain", "role", "client_type", "ga4_property_id", "ga4_domain"]:
+                    if key in data:
+                        fields.append(f"{key}=?")
+                        values.append(data[key])
+                if not fields:
+                    self.json_response({"ok": False, "error": "No fields to update"}, 400)
+                    return
+                fields.append("updated_at=?")
+                values.append(now())
+                values.append(client_id)
+                conn.execute(f"UPDATE clients SET {','.join(fields)} WHERE id=?", values)
+                conn.commit()
+            self.json_response({"ok": True, "client_id": client_id, "summary": summary(conn, "all")})
+            return
             client_id = body.get("client_id", "")
             demo = body.get("demo", True)
             from gbp_monitor import init_gbp, get_latest_gbp_metrics, get_gbp_trend, run_gbp_monitor, calculate_gbp_health_score

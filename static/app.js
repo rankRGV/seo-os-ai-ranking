@@ -398,10 +398,11 @@ function reportsView(){
 }
 function settingsView(){
   const s=state.data.settings;
-  const clientRows = state.data.clients.map(c => `<div class="delete-client-row"><div><strong>${esc(c.name)}</strong><span>${esc(c.domain)} · ${esc(c.hermes_profile)} · ${esc(c.client_type||'local')}</span></div><button class="btn danger" data-delete-client="${esc(c.id)}">Delete client</button></div>`).join('');
+  const clientRows = state.data.clients.map(c => `<div class="delete-client-row"><div><strong>${esc(c.name)}</strong><span>${esc(c.domain)} · ${esc(c.hermes_profile)} · ${esc(c.client_type||'local')}</span></div><div style="display:flex;gap:6px"><button class="btn" data-edit-client="${esc(c.id)}">Edit</button><button class="btn danger" data-delete-client="${esc(c.id)}">Delete</button></div></div>`).join('');
   const body = `<div class="grid" style="grid-template-columns:1.1fr .9fr"><div class="card settings-card"><h3>Add new client</h3><p>Onboard a new client. A Hermes profile, workspace, and dashboard row are created automatically. Then connect GSC + GA4.</p><div style="display:flex;flex-direction:column;gap:8px"><label>Client ID *</label><input class="modal-input" id="acId" placeholder="e.g. edel-roofing" /><label>Business name *</label><input class="modal-input" id="acName" placeholder="e.g. Edel Roofing" /><label>Domain *</label><input class="modal-input" id="acDomain" placeholder="https://edelroofing.com" /><label>Role / niche</label><input class="modal-input" id="acRole" placeholder="e.g. Roofing contractor" /><label>Client type</label><select class="modal-input" id="acType"><option value="local">Local business (GBP, map pack)</option><option value="national">National / e-commerce (no GBP)</option></select><button class="btn primary" id="addClientSubmit">Create client</button></div></div><div class="card settings-card"><h3>Connection status</h3><div class="connection-list"><div><span>Scheduler</span><strong>${esc(s.scheduler_mode)}</strong></div><div><span>Model policy</span><strong>Cheap by default</strong></div><div><span>Approval safety</span><strong>State first, production later</strong></div></div></div><div class="card settings-card" style="grid-column:1/-1"><h3>Safe action policy</h3><p>${esc(s.safe_actions)}</p><p><strong>Model policy:</strong> ${esc(s.model_policy)}</p><p><strong>Product setup goal:</strong> ${esc(s.onboarding_goal)}</p></div><div class="card settings-card danger-zone" style="grid-column:1/-1"><h3>Danger zone: delete client</h3><p>Settings-only destructive control. This removes the client and client-scoped prototype rows from SQLite. Production v1 should archive/export first, then require a stronger confirmation.</p><div class="delete-client-list">${clientRows}</div></div></div>`;
   setTimeout(()=>{
     document.querySelectorAll('[data-delete-client]').forEach(b=>b.onclick=()=>deleteClient(b.dataset.deleteClient));
+    document.querySelectorAll('[data-edit-client]').forEach(b=>b.onclick=()=>openEditClientModal(b.dataset.editClient));
     const submit = document.getElementById('addClientSubmit');
     if(submit) submit.onclick = showAddClientModal;
   },0);
@@ -551,6 +552,64 @@ async function loadGoogleSites(){
 function closeModal(){
   const modal = document.getElementById('modal');
   if(modal) modal.remove();
+}
+
+function openEditClientModal(clientId){
+  const client = (state.data.clients || []).find(c => c.id === clientId);
+  if (!client) return toast('Client not found', true);
+
+  closeModal();
+  const modal = document.createElement('div');
+  modal.id = 'modal';
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="prospect-modal" style="max-width:480px">
+    <div class="modal-head"><h3>Edit Client — ${esc(client.name)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label>Business name</label>
+        <input class="modal-input" id="ecName" value="${esc(client.name)}" />
+        <label>Domain</label>
+        <input class="modal-input" id="ecDomain" value="${esc(client.domain)}" />
+        <label>Role / niche</label>
+        <input class="modal-input" id="ecRole" value="${esc(client.role || '')}" />
+        <label>Client type</label>
+        <select class="modal-input" id="ecType">
+          <option value="local" ${client.client_type === 'local' ? 'selected' : ''}>Local business (GBP, map pack)</option>
+          <option value="national" ${client.client_type === 'national' ? 'selected' : ''}>National / e-commerce (no GBP)</option>
+        </select>
+        <label>GA4 Property ID</label>
+        <input class="modal-input" id="ecGa4" value="${esc(client.ga4_property_id || '')}" placeholder="e.g. 123456789" />
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn primary" id="ecSave">Save changes</button>
+          <button class="btn" onclick="closeModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+
+  document.getElementById('ecSave').onclick = async () => {
+    const name = document.getElementById('ecName').value.trim();
+    const domain = document.getElementById('ecDomain').value.trim();
+    const role = document.getElementById('ecRole').value.trim();
+    const client_type = document.getElementById('ecType').value;
+    const ga4_property_id = document.getElementById('ecGa4').value.trim();
+    if (!name || !domain) { toast('Name and domain are required', true); return; }
+    try {
+      const r = await api('/api/clients/' + encodeURIComponent(clientId) + '/update', {
+        method: 'POST',
+        body: JSON.stringify({ name, domain, role, client_type, ga4_property_id })
+      });
+      if (r.ok) {
+        toast('Client updated ✓');
+        state.data = r.summary;
+        closeModal();
+        render();
+      } else {
+        toast(r.error || 'Update failed', true);
+      }
+    } catch(e) { toast('Update failed', true); console.error(e); }
+  };
 }
 
 async function deleteClient(clientId){
