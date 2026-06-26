@@ -971,6 +971,31 @@ class Handler(SimpleHTTPRequestHandler):
                     if key in data:
                         fields.append(f"{key}=?")
                         values.append(data[key])
+                # Auto-manage connection status flags
+                # If ga4_property_id is being set to non-empty, mark GA4 as connected
+                if data.get("ga4_property_id"):
+                    fields.append("ga4_status='connected'")
+                    # Also store ga4_domain from domain if not explicitly provided
+                    if "ga4_domain" not in data and "domain" in data:
+                        fields.append("ga4_domain=?")
+                        values.append(data["domain"])
+                elif "ga4_property_id" in data and not data.get("ga4_property_id"):
+                    fields.append("ga4_status='not_connected'")
+                # If domain matches a GSC-verified site, auto-connect GSC
+                if data.get("domain"):
+                    try:
+                        from scripts.google_discovery import discover_gsc_sites
+                        gsc_result = discover_gsc_sites()
+                        gsc_sites = gsc_result.get("sites", []) if isinstance(gsc_result, dict) else gsc_result
+                        new_domain = data["domain"].split("//")[-1].rstrip("/").replace("www.", "")
+                        for site in gsc_sites:
+                            site_url = site.get("siteUrl", "")
+                            site_domain = site_url.replace("sc-domain:", "").replace("https://", "").replace("http://", "").rstrip("/").replace("www.", "")
+                            if new_domain == site_domain:
+                                fields.append("gsc_status='connected'")
+                                break
+                    except Exception:
+                        pass  # GSC discovery unavailable, skip auto-connect
                 if not fields:
                     self.json_response({"ok": False, "error": "No fields to update"}, 400)
                     return
