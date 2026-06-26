@@ -189,18 +189,42 @@ def discover_all():
             continue
         gsc_info = gsc_by_domain.get(domain, {})
         ga4_info = ga4_by_domain.get(domain, {})
-        
+        existing = domain in existing_domains
+
         candidates.append({
             "domain": domain,
+            "name": gsc_info.get("siteUrl", ga4_info.get("propertyName", domain)),
             "businessName": _domain_to_business_name(domain),
             "in_gsc": bool(gsc_info),
+            "gsc": bool(gsc_info),
+            "ga4": bool(ga4_info),
             "gsc_permission": gsc_info.get("permissionLevel", ""),
             "in_ga4": bool(ga4_info),
             "ga4_property_id": ga4_info.get("propertyId", ""),
             "ga4_property_name": ga4_info.get("propertyName", ""),
-            "already_added": domain in existing_domains
+            "already_added": existing
         })
-    
+
+    # Also include GA4 properties without a domain match
+    for prop in ga4.get("properties", []):
+        d = prop.get("domain", "")
+        if d and (d in gsc_by_domain or d in [c["domain"] for c in candidates]):
+            continue
+        candidates.append({
+            "domain": d,
+            "name": prop.get("propertyName", ""),
+            "businessName": prop.get("propertyName", "").replace(" - GA4", ""),
+            "in_gsc": False,
+            "gsc": False,
+            "ga4": True,
+            "gsc_permission": "",
+            "in_ga4": True,
+            "ga4_property_id": prop.get("propertyId", ""),
+            "ga4_property_name": prop.get("propertyName", ""),
+            "already_added": False,
+            "no_domain_match": True
+        })
+
     return {
         "ok": True,
         "gsc_ok": gsc.get("ok", False),
@@ -208,6 +232,7 @@ def discover_all():
         "ga4_ok": ga4.get("ok", False),
         "ga4_error": ga4.get("error", ""),
         "candidates": candidates,
+        "sites": [c for c in candidates if not c.get("already_added")],
         "summary": {
             "total": len(candidates),
             "with_gsc": sum(1 for c in candidates if c["in_gsc"]),
@@ -219,16 +244,20 @@ def discover_all():
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _extract_domain(site_url):
-    """Extract clean domain from GSC site URL or any URL."""
+    """Extract clean domain from GSC site URL or any URL. Strips www."""
     if not site_url:
         return ""
     # sc-domain:example.com → example.com
     if site_url.startswith("sc-domain:"):
-        return site_url.replace("sc-domain:", "").strip("/")
-    # https://example.com/ → example.com
-    if "://" in site_url:
-        return site_url.split("://")[1].strip("/").split("/")[0]
-    return site_url.strip("/")
+        d = site_url.replace("sc-domain:", "").strip("/")
+    elif "://" in site_url:
+        d = site_url.split("://")[1].strip("/").split("/")[0]
+    else:
+        d = site_url.strip("/")
+    # Normalize: strip www.
+    if d.startswith("www."):
+        d = d[4:]
+    return d
 
 def _domain_to_business_name(domain):
     """Convert domain to a reasonable business name."""

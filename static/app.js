@@ -501,7 +501,7 @@ async function loadGoogleSites(){
   try {
     const r = await api('/api/google/discover');
     if (!r.ok) { list.innerHTML = '<div class="muted">Failed to load: ' + (r.error || 'unknown error') + '</div>'; return; }
-    const sites = r.sites || [];
+    const sites = (r.candidates || []).filter(s => s.domain || s.name);
     if (sites.length === 0) { list.innerHTML = '<div class="muted">No sites found in your Google accounts.</div>'; return; }
     list.innerHTML = sites.map(s => `
       <label class="google-site-item">

@@ -18,7 +18,9 @@ import uuid
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError as _HTTPError, URLError as _URLError
+from urllib.parse import parse_qs, urlparse, urlencode
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -1564,20 +1566,21 @@ def refresh_ga4_token() -> bool:
             token = json.load(f)
         if "refresh_token" not in token:
             return True  # token exists but can't refresh; assume valid
-        import urllib.parse as _up
-        data = _up.urlencode({
+        data = urlencode({
             "client_id": token["client_id"],
             "client_secret": token["client_secret"],
             "refresh_token": token["refresh_token"],
             "grant_type": "refresh_token",
         }).encode()
-        req = urllib.request.Request(
+        req = Request(
             "https://oauth2.googleapis.com/token", data=data,
             headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST"
         )
-        resp = urllib.request.urlopen(req, timeout=10)
+        resp = urlopen(req, timeout=10)
         result = json.loads(resp.read())
         token["token"] = result["access_token"]
+        from datetime import datetime, timezone, timedelta
+        token["expiry"] = (datetime.now(timezone.utc) + timedelta(seconds=result.get("expires_in", 3600))).isoformat()
         with open(token_path, "w") as f:
             json.dump(token, f)
         print("  ✓ GA4 token refreshed on startup")
