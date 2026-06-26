@@ -73,9 +73,11 @@ function renderNav(){
 function renderTabs(){
   const tabs = [`<span class="eyebrow">CLIENT</span><button class="pill ${state.client==='all'?'active':''}" data-client="all"><i></i>All Clients</button>`]
     .concat(state.data.clients.map(c => `<button class="pill ${state.client===c.id?'active':''}" data-client="${esc(c.id)}"><i></i>${esc(c.name)}</button>`));
-  $('.client-tabs').innerHTML = tabs.join('') + `<button class="pill" data-section="Settings">+ Add Client</button>`;
+  $('.client-tabs').innerHTML = tabs.join('') + `<button class="pill" id="addClientBtn">+ Add Client</button>`;
   document.querySelectorAll('[data-client]').forEach(b => b.onclick = () => load(b.dataset.client));
   document.querySelector('[data-section="Settings"]').onclick = () => { state.section='Settings'; render(); };
+  const addBtn = document.getElementById('addClientBtn');
+  if(addBtn) addBtn.onclick = () => openAddClientModal();
 }
 function renderContext(){
   const d = state.data;
@@ -407,11 +409,12 @@ function settingsView(){
 }
 
 async function showAddClientModal(){
-  const id = document.getElementById('acId')?.value?.trim() || '';
-  const name = document.getElementById('acName')?.value?.trim() || '';
-  let domain = document.getElementById('acDomain')?.value?.trim() || '';
-  const role = document.getElementById('acRole')?.value?.trim() || 'SEO client';
-  const client_type = document.getElementById('acType')?.value || 'local';
+  // Read from modal form if open, else from Settings page form
+  const id = document.getElementById('mcId')?.value?.trim() || document.getElementById('acId')?.value?.trim() || '';
+  const name = document.getElementById('mcName')?.value?.trim() || document.getElementById('acName')?.value?.trim() || '';
+  let domain = document.getElementById('mcDomain')?.value?.trim() || document.getElementById('acDomain')?.value?.trim() || '';
+  const role = document.getElementById('mcRole')?.value?.trim() || document.getElementById('acRole')?.value?.trim() || 'SEO client';
+  const client_type = document.getElementById('mcType')?.value || document.getElementById('acType')?.value || 'local';
   if(!id || !name || !domain){ toast('Client ID, name, and domain are required', true); return; }
   if(!domain.startsWith('http')){ domain = 'https://' + domain; }
   try{
@@ -420,11 +423,48 @@ async function showAddClientModal(){
       toast(`Client "${name}" created ✓`);
       state.client = 'all';
       state.data = r.summary;
+      closeModal();
       render();
     } else {
       toast(r.error || 'Failed to create client', true);
     }
   }catch(e){ toast('Create client failed', true); console.error(e); }
+}
+
+function openAddClientModal(){
+  closeModal();
+  const modal = document.createElement('div');
+  modal.id = 'modal';
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="prospect-modal" style="max-width:480px">
+    <div class="modal-head"><h3>➕ Add New Client</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <p class="muted">Onboard a new client. Connect GSC + GA4 after creation.</p>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+        <label>Client ID *</label>
+        <input class="modal-input" id="mcId" placeholder="e.g. edel-roofing" />
+        <label>Business name *</label>
+        <input class="modal-input" id="mcName" placeholder="e.g. Edel Roofing" />
+        <label>Domain *</label>
+        <input class="modal-input" id="mcDomain" placeholder="https://edelroofing.com" />
+        <label>Role / niche</label>
+        <input class="modal-input" id="mcRole" placeholder="e.g. Roofing contractor" />
+        <label>Client type</label>
+        <select class="modal-input" id="mcType"><option value="local">Local business (GBP, map pack)</option><option value="national">National / e-commerce (no GBP)</option></select>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn primary" id="mcSubmit">Create client</button>
+          <button class="btn" onclick="closeModal()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('mcSubmit').onclick = () => showAddClientModal();
+}
+
+function closeModal(){
+  const modal = document.getElementById('modal');
+  if(modal) modal.remove();
 }
 
 async function deleteClient(clientId){
