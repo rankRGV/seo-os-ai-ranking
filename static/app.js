@@ -586,6 +586,7 @@ function prospectsView(){
   if(colFilters.city) prospects = prospects.filter(p => (p.city||'') === colFilters.city);
   if(colFilters.niche) prospects = prospects.filter(p => (p.niche||'') === colFilters.niche);
   if(colFilters.pipeline_stage) prospects = prospects.filter(p => (p.pipeline_stage||'new') === colFilters.pipeline_stage);
+  if(colFilters.keyword) prospects = prospects.filter(p => (p.keyword||'') === colFilters.keyword);
 
   // Status filter chips
   const statuses = Object.keys(stats.by_status);
@@ -631,6 +632,7 @@ function prospectsView(){
   const uniqueChannels = [...new Set(allProspects.map(p => p.channel||'FB DM'))].sort();
   const uniqueCities = [...new Set(allProspects.map(p => p.city).filter(Boolean))].sort();
   const uniqueNiches = [...new Set(allProspects.map(p => p.niche).filter(Boolean))].sort();
+  const uniqueKeywords = [...new Set(allProspects.map(p => p.keyword).filter(Boolean))].sort();
   const uniquePipelines = [...new Set(allProspects.map(p => p.pipeline_stage||'new'))].sort();
 
   const colFilter = (label, key, values, current) => {
@@ -644,7 +646,7 @@ function prospectsView(){
     </th>`;
   };
 
-  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Keyword</th>${colFilter('City','city',uniqueCities,colFilters.city||'')}${colFilter('Niche','niche',uniqueNiches,colFilters.niche||'')}<th style="text-align:center">Local Rank</th><th style="text-align:center">Score</th><th>Website</th><th>Social</th>${colFilter('Status','status',uniqueStatuses,colFilters.status||'')}${colFilter('Channel','channel',uniqueChannels,colFilters.channel||'')}${colFilter('Pipeline','pipeline_stage',uniquePipelines,colFilters.pipeline_stage||'')}<th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
+  return page('Prospects', `Showing ${prospects.length} of ${allProspects.length} prospects.`, `${pipelineBar}${filterChips}<div class="prospect-toolbar"><button class="btn primary" id="addProspectBtn">+ Add Prospect</button><input class="search-input" id="prospectSearch" placeholder="Search name, keyword, city..." value="${esc(searchQ)}" /></div><div class="card section-card"><div class="table-wrap"><table><thead><tr><th>Business</th>${colFilter('Keyword','keyword',uniqueKeywords,colFilters.keyword||'')}${colFilter('City','city',uniqueCities,colFilters.city||'')}${colFilter('Niche','niche',uniqueNiches,colFilters.niche||'')}<th style="text-align:center">Local Rank</th><th style="text-align:center">Score</th><th>Website</th><th>Social</th>${colFilter('Status','status',uniqueStatuses,colFilters.status||'')}${colFilter('Channel','channel',uniqueChannels,colFilters.channel||'')}${colFilter('Pipeline','pipeline_stage',uniquePipelines,colFilters.pipeline_stage||'')}<th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="12" class="empty">No prospects match this filter.</td></tr>'}</tbody></table></div></div>`);
 }
 
 function showReachOutModal(prospectId){
